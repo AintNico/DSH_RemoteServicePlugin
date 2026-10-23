@@ -108,6 +108,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private String pendingName;
     private long pendingSize = -1;
     private Uri sharedUri;
+    private boolean fileDownloadInFlight;
 
     private StringBuilder streamBuffer;
     private JSONObject streamingMessage;
@@ -893,7 +894,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         actions.addView(close, new LinearLayout.LayoutParams(0, dp(40), 1));
 
         box.addView(pathView);
-        box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(360)));
+        // Fixed pixel height: a weighted child inside a Dialog only works when the content
+        // view is measured exactly, which is not guaranteed across themes.
+        int listHeight = (int) (getResources().getDisplayMetrics().heightPixels * 0.52f);
+        box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
         box.addView(status);
         box.addView(actions);
 
@@ -927,16 +931,59 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                         for (JSONObject entry : items) {
                             final String name = entry.optString("name");
                             final boolean directory = entry.optBoolean("directory");
-                            TextView rowView = label((directory ? "📁  " : "📄  ") + name, 14, TEXT, directory);
-                            rowView.setPadding(dp(4), dp(12), dp(4), dp(12));
-                            rowView.setBackground(new RippleDrawable(ColorStateList.valueOf(0x1F000000), null, null));
+                            final long size = entry.optLong("size", -1);
+                            final String fullPath = ".".equals(path) ? name : path + "/" + name;
+
+                            LinearLayout rowView = new LinearLayout(this);
+                            rowView.setOrientation(LinearLayout.HORIZONTAL);
+                            rowView.setGravity(Gravity.CENTER_VERTICAL);
+                            rowView.setPadding(dp(8), dp(6), dp(8), dp(6));
+                            rowView.setMinimumHeight(dp(48));
+                            rowView.setBackground(rowRipple());
+
+                            TextView icon = label(directory ? "📁" : "📄", 16, TEXT, false);
+                            icon.setPadding(0, 0, dp(10), 0);
+                            rowView.addView(icon);
+
+                            LinearLayout texts = new LinearLayout(this);
+                            texts.setOrientation(LinearLayout.VERTICAL);
+                            TextView nameView = label(name, 14, TEXT, directory);
+                            nameView.setSingleLine(true);
+                            nameView.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                            texts.addView(nameView);
+                            TextView metaView = null;
+                            if (!directory && size > 0) {
+                                metaView = label(formatSize(size), 11, MUTED, false);
+                                texts.addView(metaView);
+                            }
+                            rowView.addView(texts, weight(1));
+
+                            final TextView meta = metaView;
                             rowView.setOnClickListener(v -> {
                                 if (directory) {
-                                    current[0] = ".".equals(path) ? name : path + "/" + name;
+                                    current[0] = fullPath;
                                     refresh[0].run();
-                                } else {
-                                    downloadWorkspaceFile(target, ".".equals(path) ? name : path + "/" + name, status);
+                                    return;
                                 }
+                                if (fileDownloadInFlight) {
+                                    Toast.makeText(this, "上一个文件还在下载…", Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                fileDownloadInFlight = true;
+                                rowView.setEnabled(false);
+                                if (meta != null) {
+                                    meta.setText("下载中…");
+                                }
+                                nameView.setTextColor(ACCENT);
+                                Toast.makeText(this, "开始下载 " + name, Toast.LENGTH_SHORT).show();
+                                downloadWorkspaceFile(target, fullPath, status, () -> {
+                                    fileDownloadInFlight = false;
+                                    rowView.setEnabled(true);
+                                    nameView.setTextColor(TEXT);
+                                    if (meta != null) {
+                                        meta.setText(size > 0 ? formatSize(size) : "");
+                                    }
+                                });
                             });
                             rows.addView(rowView);
                         }
@@ -950,6 +997,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         up.setOnClickListener(v -> {
             if (".".equals(current[0])) {
+                Toast.makeText(this, "已经在工作区根目录", Toast.LENGTH_SHORT).show();
                 return;
             }
             int cut = current[0].lastIndexOf('/');
@@ -965,11 +1013,22 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     }
 
     /**
+     * A ripple clipped to the row. Without a mask the ripple is unbounded and paints a huge
+     * circle over the dialog.
+     */
+    private Drawable rowRipple() {
+        GradientDrawable mask = new GradientDrawable();
+        mask.setColor(Color.WHITE);
+        mask.setCornerRadius(dp(10));
+        return new RippleDrawable(ColorStateList.valueOf(0x24000000), null, mask);
+    }
+
+    /**
      * Downloads into the app cache first. The file is only offered — share it straight to
      * another app, or explicitly save it to 下载/DSH. Nothing lands in Downloads unless the
      * user asks for it.
      */
-    private void downloadWorkspaceFile(String target, String path, TextView status) {
+    private void downloadWorkspaceFile(String target, String path, TextView status, Runnable onFinished) {
         status.setText("正在下载…");
         io.execute(() -> {
             try {
@@ -987,10 +1046,14 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 long size = file.length();
                 main.post(() -> {
                     status.setText("已下载 " + fileName + "（" + formatSize(size) + "）");
+                    onFinished.run();
                     offerDownloadedFile(file, fileName, status);
                 });
             } catch (Exception exception) {
-                main.post(() -> status.setText("下载失败：" + friendly(exception)));
+                main.post(() -> {
+                    status.setText("下载失败：" + friendly(exception));
+                    onFinished.run();
+                });
             }
         });
     }
