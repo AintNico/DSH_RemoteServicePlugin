@@ -44,9 +44,11 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -63,11 +65,18 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private static final int REQ_PICK_FILE = 1001;
     private static final int REQ_NOTIFICATIONS = 1002;
 
+    /** Data bound to the virtualized chat list; the visible rows are far fewer. */
+    private static final int MAX_MESSAGES = 300;
+
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<JSONObject> messages = new ArrayList<>();
     private final List<ListRow> sessionRows = new ArrayList<>();
     private final Map<String, View> approvalViews = new HashMap<>();
+
+    /** Rendered markdown is expensive; cache it per message and let GC follow the message list. */
+    private final Map<JSONObject, CharSequence> markdownCache =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     private Prefs prefs;
     private Api api;
@@ -95,6 +104,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private Uri pendingUri;
     private String pendingName;
     private long pendingSize = -1;
+    private Uri sharedUri;
 
     private StringBuilder streamBuffer;
     private JSONObject streamingMessage;
@@ -110,6 +120,50 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             showPairing();
         } else {
             connect();
+        }
+
+        handleShareIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleShareIntent(intent);
+    }
+
+    /**
+     * Receives a file shared from another app (QQ, WeChat, any file manager). Those apps keep
+     * their chat files in private storage that no third-party app can read on Android 11+, so
+     * sharing is the supported way in. The file is staged, never sent immediately.
+     */
+    private void handleShareIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String action = intent.getAction();
+        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            return;
+        }
+
+        Uri uri = null;
+        Object stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        if (stream instanceof Uri) {
+            uri = (Uri) stream;
+        }
+        if (uri == null && intent.getClipData() != null && intent.getClipData().getItemCount() > 0) {
+            uri = intent.getClipData().getItemAt(0).getUri();
+        }
+        if (uri == null) {
+            return;
+        }
+
+        if (sessionId != null && chatAdapter != null) {
+            stageAttachment(uri);
+            Toast.makeText(this, "已添加待发送附件", Toast.LENGTH_SHORT).show();
+        } else {
+            sharedUri = uri;
+            Toast.makeText(this, "请先打开一个会话，附件的说明文字写完再发送", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -567,7 +621,19 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         setScreen(root);
         approvalViews.clear();
         approvalBox.removeAllViews();
+        if (sharedUri != null) {
+            Uri uri = sharedUri;
+            sharedUri = null;
+            stageAttachment(uri);
+        }
         loadMessages();
+    }
+
+    /** Keeps the chat bounded: the list is virtualized, this bounds the data behind it. */
+    private void trimMessages() {
+        while (messages.size() > MAX_MESSAGES) {
+            messages.remove(0);
+        }
     }
 
     private void loadMessages() {
@@ -589,6 +655,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     }
                     messages.clear();
                     messages.addAll(rows);
+                    trimMessages();
                     lastSeq = throughSeq;
                     chatAdapter.notifyDataSetChanged();
                     scrollToBottom();
@@ -1306,6 +1373,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             TextView bubble;
             View leftSpacer;
             View rightSpacer;
+            Drawable userBg;
+            Drawable assistantBg;
             if (convertView == null) {
                 row = new LinearLayout(MainActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1321,7 +1390,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 row.addView(rightSpacer, new LinearLayout.LayoutParams(0, 1, 0));
 
-                row.setTag(new Object[] { bubble, leftSpacer, rightSpacer });
+                // One drawable per recycled row instead of per bind.
+                userBg = bubbleUser();
+                assistantBg = bubbleAssistant();
+                row.setTag(new Object[] { bubble, leftSpacer, rightSpacer, userBg, assistantBg });
                 convertView = row;
             } else {
                 row = (LinearLayout) convertView;
@@ -1329,6 +1401,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 bubble = (TextView) tag[0];
                 leftSpacer = (View) tag[1];
                 rightSpacer = (View) tag[2];
+                userBg = (Drawable) tag[3];
+                assistantBg = (Drawable) tag[4];
             }
 
             JSONObject message = messages.get(position);
@@ -1337,7 +1411,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             if ("tool".equals(role)) {
                 bubble.setText(raw);
             } else {
-                bubble.setText(Markdown.render(raw));
+                CharSequence rendered = markdownCache.get(message);
+                if (rendered == null) {
+                    rendered = Markdown.render(raw);
+                    markdownCache.put(message, rendered);
+                }
+                bubble.setText(rendered);
             }
 
             boolean isUser = "user".equals(role);
@@ -1364,7 +1443,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 bubble.setTextSize(15);
                 bubble.setTextColor(Color.WHITE);
                 bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
-                bubble.setBackground(bubbleUser());
+                bubble.setBackground(userBg);
             } else if ("tool".equals(role)) {
                 bubble.setTextSize(12);
                 bubble.setTextColor(MUTED);
@@ -1374,7 +1453,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 bubble.setTextSize(15);
                 bubble.setTextColor(TEXT);
                 bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
-                bubble.setBackground(bubbleAssistant());
+                bubble.setBackground(assistantBg);
             }
             return convertView;
         }
