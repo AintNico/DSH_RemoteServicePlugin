@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
 
         AppWindow.Resize(new SizeInt32(1120, 760));
+        Activated += EnsureWindowSize;
         SessionList.ItemsSource = _sessions;
         ServerLabel.Text = _settings.ServerUrl;
         _countdownTimer.Tick += (_, _) => TickCountdowns();
@@ -47,6 +48,19 @@ public sealed partial class MainWindow : Window
             _api?.Dispose();
             _tunnel.Dispose();
         };
+    }
+
+    /// <summary>
+    /// A window created while another instance is still shutting down can come up at the
+    /// minimum size; re-apply the intended size on the first activation.
+    /// </summary>
+    private void EnsureWindowSize(object sender, WindowActivatedEventArgs args)
+    {
+        Activated -= EnsureWindowSize;
+        if (AppWindow.Size.Width < 400 || AppWindow.Size.Height < 300)
+        {
+            AppWindow.Resize(new SizeInt32(1120, 760));
+        }
     }
 
     // ---------- 连接 ----------
