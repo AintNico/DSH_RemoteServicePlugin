@@ -66,7 +66,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final List<JSONObject> messages = new ArrayList<>();
-    private final List<JSONObject> sessions = new ArrayList<>();
+    private final List<ListRow> sessionRows = new ArrayList<>();
     private final Map<String, View> approvalViews = new HashMap<>();
 
     private Prefs prefs;
@@ -86,6 +86,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private TextView chatStatus;
     private Button attachButton;
     private TextView sessionStatus;
+    private Button refreshButton;
+    private long refreshStartedAt;
+    private int sessionCount;
     private LinearLayout pendingRow;
     private TextView pendingLabel;
 
@@ -253,7 +256,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         LinearLayout header = row();
         header.setPadding(dp(16), dp(14), dp(16), dp(10));
         header.addView(label("会话", 20, TEXT, true), weight(1));
-        header.addView(button("刷新", PANEL, ACCENT), new LinearLayout.LayoutParams(dp(72), dp(40)));
+        refreshButton = button("刷新", PANEL, ACCENT);
+        header.addView(refreshButton, new LinearLayout.LayoutParams(dp(72), dp(40)));
+        refreshButton.setOnClickListener(v -> loadSessions(true));
         root.addView(header);
 
         sessionStatus = label("正在加载…", 12, MUTED, false);
@@ -278,7 +283,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             LiveLink.get().stop();
             stopService(new Intent(this, RemoteService.class));
             api = null;
-            sessions.clear();
+            sessionRows.clear();
             sessionAdapter.notifyDataSetChanged();
             showPairing();
         });
@@ -288,34 +293,158 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     }
 
     private void loadSessions() {
+        loadSessions(false);
+    }
+
+    /**
+     * Loads the workspace-grouped session list. The manual flag drives the refresh button so a
+     * tap always has visible feedback, even when the payload is unchanged.
+     */
+    private void loadSessions(boolean manual) {
         if (api == null) {
             return;
         }
         lastSessionRefresh = System.currentTimeMillis();
+        if (manual) {
+            startRefresh();
+        }
         io.execute(() -> {
             try {
-                JSONArray array = api.sessions();
-                List<JSONObject> rows = new ArrayList<>();
-                for (int i = 0; i < (array == null ? 0 : array.length()); i++) {
-                    rows.add(array.getJSONObject(i));
+                JSONObject payload = api.workspaces();
+                List<ListRow> rows = buildSessionRows(payload);
+                int sections = 0;
+                for (ListRow row : rows) {
+                    if (row.section) {
+                        sections++;
+                    }
                 }
+                int count = rows.size() - sections;
+                final int groups = sections;
                 main.post(() -> {
+                    finishRefresh();
                     if (!sessionsVisible) {
                         return;
                     }
-                    sessions.clear();
-                    sessions.addAll(rows);
+                    sessionRows.clear();
+                    sessionRows.addAll(rows);
+                    sessionCount = count;
                     sessionAdapter.notifyDataSetChanged();
-                    sessionStatus.setText(rows.isEmpty() ? "还没有会话" : rows.size() + " 个会话");
+                    sessionStatus.setText(describeList(count, groups));
                 });
             } catch (Exception exception) {
                 main.post(() -> {
+                    finishRefresh();
                     if (sessionStatus != null) {
                         sessionStatus.setText(friendly(exception));
                     }
                 });
             }
         });
+    }
+
+    private String describeList(int count, int groups) {
+        if (count == 0 && groups == 0) {
+            return "还没有会话";
+        }
+        return groups + " 个工作区 · " + count + " 个会话";
+    }
+
+    private void startRefresh() {
+        if (refreshButton == null) {
+            return;
+        }
+        refreshStartedAt = System.currentTimeMillis();
+        refreshButton.setEnabled(false);
+        refreshButton.setAlpha(0.5f);
+        refreshButton.setText("刷新中");
+        if (sessionStatus != null) {
+            sessionStatus.setText("正在刷新…");
+        }
+    }
+
+    private void finishRefresh() {
+        if (refreshButton == null) {
+            return;
+        }
+        // A local request can finish in tens of milliseconds; keep the state visible briefly so
+        // the tap always looks acknowledged.
+        long elapsed = System.currentTimeMillis() - refreshStartedAt;
+        long remaining = Math.max(0, 450 - elapsed);
+        main.postDelayed(() -> {
+            if (refreshButton == null) {
+                return;
+            }
+            refreshButton.setEnabled(true);
+            refreshButton.setAlpha(1f);
+            refreshButton.setText("刷新");
+        }, remaining);
+    }
+
+    private List<ListRow> buildSessionRows(JSONObject payload) {
+        List<ListRow> rows = new ArrayList<>();
+        JSONArray groups = payload.optJSONArray("workspaces");
+        int groupCount = groups == null ? 0 : groups.length();
+
+        for (int i = 0; i < groupCount; i++) {
+            JSONObject group = groups.optJSONObject(i);
+            if (group == null) {
+                continue;
+            }
+            JSONArray items = group.optJSONArray("sessions");
+            int count = items == null ? 0 : items.length();
+            rows.add(ListRow.section(
+                    group.optString("title", "工作区"),
+                    count + " 个会话 · " + shortenPath(group.optString("path", ""))));
+            for (int j = 0; j < count; j++) {
+                JSONObject session = items.optJSONObject(j);
+                if (session != null) {
+                    rows.add(ListRow.session(session));
+                }
+            }
+        }
+
+        JSONArray ungrouped = payload.optJSONArray("ungrouped");
+        int loose = ungrouped == null ? 0 : ungrouped.length();
+        if (loose > 0) {
+            rows.add(ListRow.section("未分组", loose + " 个会话"));
+            for (int j = 0; j < loose; j++) {
+                JSONObject session = ungrouped.optJSONObject(j);
+                if (session != null) {
+                    rows.add(ListRow.session(session));
+                }
+            }
+        }
+        return rows;
+    }
+
+    private String shortenPath(String path) {
+        if (path == null || path.isEmpty()) {
+            return "";
+        }
+        return path;
+    }
+
+    /** One entry in the session list: either a workspace header or a session. */
+    private static final class ListRow {
+        final boolean section;
+        final String title;
+        final String subtitle;
+        final JSONObject session;
+
+        private ListRow(boolean section, String title, String subtitle, JSONObject session) {
+            this.section = section;
+            this.title = title;
+            this.subtitle = subtitle;
+            this.session = session;
+        }
+
+        static ListRow section(String title, String subtitle) {
+            return new ListRow(true, title, subtitle, null);
+        }
+
+        static ListRow session(JSONObject session) {
+            return new ListRow(false, null, null, session);
+        }
     }
 
     private String titleOf(JSONObject session) {
@@ -925,7 +1054,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             }
         }
         if (sessionStatus != null && sessionsVisible) {
-            sessionStatus.setText(connected ? (sessions.isEmpty() ? "还没有会话" : sessions.size() + " 个会话")
+            sessionStatus.setText(connected ? (sessionCount == 0 ? "还没有会话" : sessionCount + " 个会话")
                     : "连接中断，正在重连…");
             if (connected) {
                 loadSessions();
@@ -1008,16 +1137,17 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     }
 
     private final class SessionAdapter extends BaseAdapter {
-        private final int ROW = 0;
+        private static final int TYPE_SECTION = 0;
+        private static final int TYPE_SESSION = 1;
 
         @Override
         public int getCount() {
-            return sessions.size();
+            return sessionRows.size();
         }
 
         @Override
         public Object getItem(int position) {
-            return sessions.get(position);
+            return sessionRows.get(position);
         }
 
         @Override
@@ -1026,13 +1156,69 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
 
         @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return sessionRows.get(position).section ? TYPE_SECTION : TYPE_SESSION;
+        }
+
+        @Override
+        public boolean isEnabled(int position) {
+            return !sessionRows.get(position).section;
+        }
+
+        @Override
         public View getView(int position, View convertView, ViewGroup parent) {
+            ListRow item = sessionRows.get(position);
+            if (item.section) {
+                return sectionView(item, convertView);
+            }
+            return sessionView(item.session, convertView);
+        }
+
+        private View sectionView(ListRow item, View convertView) {
+            LinearLayout box;
+            TextView title;
+            TextView subtitle;
+            if (convertView == null || !(convertView.getTag() instanceof SectionHolder)) {
+                box = new LinearLayout(MainActivity.this);
+                box.setOrientation(LinearLayout.VERTICAL);
+                box.setPadding(dp(16), dp(16), dp(16), dp(6));
+                box.setBackgroundColor(Color.WHITE);
+
+                title = label("", 13, MUTED, true);
+                subtitle = label("", 11, MUTED, false);
+                subtitle.setSingleLine(true);
+                subtitle.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                box.addView(title);
+                box.addView(subtitle);
+
+                SectionHolder holder = new SectionHolder();
+                holder.title = title;
+                holder.subtitle = subtitle;
+                box.setTag(holder);
+                convertView = box;
+            } else {
+                box = (LinearLayout) convertView;
+                SectionHolder holder = (SectionHolder) convertView.getTag();
+                title = holder.title;
+                subtitle = holder.subtitle;
+            }
+            title.setText(item.title);
+            subtitle.setText(item.subtitle);
+            return convertView;
+        }
+
+        private View sessionView(JSONObject session, View convertView) {
             SessionHolder holder;
-            if (convertView == null) {
+            if (convertView == null || !(convertView.getTag() instanceof SessionHolder)) {
                 LinearLayout row = new LinearLayout(MainActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(16), dp(12), dp(16), dp(12));
+                row.setPadding(dp(28), dp(11), dp(16), dp(11));
                 row.setBackgroundColor(Color.WHITE);
 
                 View dot = new View(MainActivity.this);
@@ -1073,7 +1259,6 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 holder = (SessionHolder) convertView.getTag();
             }
 
-            JSONObject session = sessions.get(position);
             boolean running = session.optBoolean("running");
             holder.title.setText(titleOf(session));
             holder.subtitle.setText((running ? "运行中" : "空闲") + " · " + session.optString("cwd", ""));
@@ -1092,6 +1277,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             });
             return convertView;
         }
+    }
+
+    private static final class SectionHolder {
+        TextView title;
+        TextView subtitle;
     }
 
     private final class ChatAdapter extends BaseAdapter {

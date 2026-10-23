@@ -123,6 +123,11 @@ public final class Api {
         return request("/api/sessions", "GET", null).optJSONArray("sessions");
     }
 
+    /** Sessions grouped exactly like the DSH sidebar: workspace sections plus ungrouped ones. */
+    public JSONObject workspaces() throws IOException {
+        return request("/api/workspaces", "GET", null);
+    }
+
     public JSONArray messages(String sessionId) throws IOException {
         return messages(sessionId, 0);
     }
