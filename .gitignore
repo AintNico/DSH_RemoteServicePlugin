@@ -5,6 +5,8 @@ node_modules/
 # .NET build output
 bin/
 obj/
+# Self-contained desktop publish output (~166 MB, built on demand)
+app/desktop/dist/
 # Android build output
 app/android/.gradle/
 app/android/build/

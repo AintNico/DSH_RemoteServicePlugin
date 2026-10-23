@@ -32,9 +32,31 @@ node --input-type=module -e "await import('./index.js')"
 
 # 桌面客户端
 dotnet build app/desktop/DshRemote.csproj -c Debug -p:Platform=x64
+
+# 桌面客户端（自包含发布，约 166 MB，可脱离 .NET 运行时运行）
+npm run publish:desktop
 ```
 
 安装到当前 profile：用 DSH 的 `plugin_manager` → `install_bundle`，目标指向本目录。
+
+## 桌面端随插件自动启动
+
+插件启用后会自己把桌面窗口拉起来，不需要单独启动：
+
+- 优先使用 `app/desktop/dist/DshRemote.exe`（自包含发布版）
+- 其次使用 `app/desktop/bin/x64/<Config>/net8.0-windows10.0.19041.0/DshRemote.exe`（开发构建）
+- 都没有时，用本机 .NET SDK 自动构建一次（需要 .NET 8 SDK）
+- 已经有窗口在运行时不会重复打开
+- 首次启动会在桌面和开始菜单创建「DSH 远程」快捷方式
+
+配置项（`cordis.patch.yml` 或 profile 配置）：
+
+```yaml
+desktop:
+  autoLaunch: true   # 关掉可禁止随插件启动
+  shortcuts: true    # 是否创建快捷方式
+  exe: null          # 指定自定义路径时优先使用
+```
 
 ## 使用
 

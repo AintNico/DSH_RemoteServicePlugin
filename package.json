@@ -15,8 +15,14 @@
     "web",
     "cordis.patch.yml",
     "locale/*.json",
-    "icon.svg"
+    "icon.svg",
+    "app/desktop",
+    "app/android"
   ],
+  "scripts": {
+    "build:desktop": "dotnet build app/desktop/DshRemote.csproj -c Debug -p:Platform=x64",
+    "publish:desktop": "dotnet publish app/desktop/DshRemote.csproj -c Release -r win-x64 --self-contained true -o app/desktop/dist"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
