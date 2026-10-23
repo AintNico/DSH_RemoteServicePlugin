@@ -86,6 +86,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private TextView chatStatus;
     private Button attachButton;
     private TextView sessionStatus;
+    private LinearLayout pendingRow;
+    private TextView pendingLabel;
+
+    private Uri pendingUri;
+    private String pendingName;
+    private long pendingSize = -1;
 
     private StringBuilder streamBuffer;
     private JSONObject streamingMessage;
@@ -239,6 +245,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         chatAdapter = null;
         streamingMessage = null;
         streamBuffer = null;
+        pendingUri = null;
+        pendingName = null;
+        pendingSize = -1;
+        pendingRow = null;
+        pendingLabel = null;
 
         LinearLayout root = column(0);
 
@@ -376,6 +387,20 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         LinearLayout composerRow = row();
         composerRow.setPadding(dp(10), dp(8), dp(10), dp(14));
 
+        pendingRow = row();
+        pendingRow.setPadding(dp(12), dp(6), dp(8), dp(2));
+        pendingRow.setVisibility(View.GONE);
+        pendingLabel = label("", 13, TEXT, false);
+        pendingLabel.setSingleLine(true);
+        pendingLabel.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        pendingRow.addView(pendingLabel, weight(1));
+        Button clearAttachment = button("✕", PANEL, MUTED);
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(dp(36), dp(36));
+        clearParams.leftMargin = dp(8);
+        pendingRow.addView(clearAttachment, clearParams);
+        clearAttachment.setOnClickListener(v -> clearPending());
+        root.addView(pendingRow);
+
         attachButton = button("＋", PANEL, ACCENT);
         attachButton.setTextSize(20);
         LinearLayout.LayoutParams attachParams = new LinearLayout.LayoutParams(dp(46), dp(46));
@@ -489,6 +514,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             return;
         }
         String text = composer.getText().toString().trim();
+        if (pendingUri != null) {
+            sendAttachment(text);
+            return;
+        }
         if (text.isEmpty()) {
             return;
         }
@@ -518,14 +547,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         if (requestCode != REQ_PICK_FILE || resultCode != RESULT_OK || data == null || data.getData() == null) {
             return;
         }
-        uploadFile(data.getData());
+        stageAttachment(data.getData());
     }
 
-    private void uploadFile(Uri uri) {
-        if (api == null || sessionId == null || uploading) {
-            return;
-        }
-
+    /** Picking a file only stages it; the user still writes the instruction before sending. */
+    private void stageAttachment(Uri uri) {
         String name = "file";
         long size = -1;
         try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
@@ -540,12 +566,56 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 }
             }
         } catch (Exception ignored) {
-            // Fall back to the defaults above.
+            // Keep the defaults.
         }
 
-        final String fileName = name;
-        final long fileSize = size;
-        final String caption = composer == null ? "" : composer.getText().toString().trim();
+        pendingUri = uri;
+        pendingName = name;
+        pendingSize = size;
+        renderPending();
+        if (composer != null) {
+            composer.requestFocus();
+        }
+    }
+
+    private void clearPending() {
+        pendingUri = null;
+        pendingName = null;
+        pendingSize = -1;
+        renderPending();
+    }
+
+    private void renderPending() {
+        if (pendingRow == null || pendingLabel == null) {
+            return;
+        }
+        if (pendingUri == null) {
+            pendingRow.setVisibility(View.GONE);
+            return;
+        }
+        pendingLabel.setText("待发送：" + pendingName
+                + (pendingSize > 0 ? "（" + formatSize(pendingSize) + "）" : ""));
+        pendingRow.setVisibility(View.VISIBLE);
+    }
+
+    private static String formatSize(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        if (bytes < 1024 * 1024) {
+            return String.format(java.util.Locale.US, "%.1f KB", bytes / 1024.0);
+        }
+        return String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0));
+    }
+
+    private void sendAttachment(String caption) {
+        if (api == null || sessionId == null || uploading || pendingUri == null) {
+            return;
+        }
+
+        final Uri uri = pendingUri;
+        final String fileName = pendingName == null ? "file" : pendingName;
+        final long fileSize = pendingSize;
         final String target = sessionId;
 
         uploading = true;
@@ -570,6 +640,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     if (composer != null) {
                         composer.setText("");
                     }
+                    clearPending();
                     if (chatStatus != null) {
                         chatStatus.setText("已发送 " + fileName);
                     }
