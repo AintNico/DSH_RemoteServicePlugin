@@ -965,25 +965,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                                     refresh[0].run();
                                     return;
                                 }
-                                if (fileDownloadInFlight) {
-                                    Toast.makeText(this, "上一个文件还在下载…", Toast.LENGTH_SHORT).show();
-                                    return;
-                                }
-                                fileDownloadInFlight = true;
-                                rowView.setEnabled(false);
-                                if (meta != null) {
-                                    meta.setText("下载中…");
-                                }
-                                nameView.setTextColor(ACCENT);
-                                Toast.makeText(this, "开始下载 " + name, Toast.LENGTH_SHORT).show();
-                                downloadWorkspaceFile(target, fullPath, status, () -> {
-                                    fileDownloadInFlight = false;
-                                    rowView.setEnabled(true);
-                                    nameView.setTextColor(TEXT);
-                                    if (meta != null) {
-                                        meta.setText(size > 0 ? formatSize(size) : "");
-                                    }
-                                });
+                                // Nothing is fetched until the user picks an action.
+                                chooseFileAction(target, fullPath, name, status);
                             });
                             rows.addView(rowView);
                         }
@@ -1028,44 +1011,123 @@ public class MainActivity extends Activity implements LiveLink.Listener {
      * another app, or explicitly save it to 下载/DSH. Nothing lands in Downloads unless the
      * user asks for it.
      */
-    private void downloadWorkspaceFile(String target, String path, TextView status, Runnable onFinished) {
-        status.setText("正在下载…");
+    /**
+     * Tapping a file opens this chooser; nothing is downloaded until an action is picked, so
+     * "分享" and "保存到下载" never race each other.
+     */
+    private void chooseFileAction(String target, String fullPath, String name, TextView status) {
+        new AlertDialog.Builder(this)
+                .setTitle(name)
+                .setItems(new String[] { "分享到其他应用", "保存到下载" }, (dialog, which) -> {
+                    if (fileDownloadInFlight) {
+                        Toast.makeText(this, "上一个文件还在处理…", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (which == 0) {
+                        shareWorkspaceFile(target, fullPath, status);
+                    } else {
+                        saveWorkspaceFile(target, fullPath, name, status);
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void shareWorkspaceFile(String target, String fullPath, TextView status) {
+        fileDownloadInFlight = true;
+        status.setText("正在准备分享…");
         io.execute(() -> {
             try {
-                JSONObject signed = api.signFile(target, path);
-                String url = signed.optString("url", "");
-                if (url.isEmpty()) {
-                    throw new Exception("服务端没有返回下载地址");
-                }
-                String fileName = safeFileName(signed.optString("name", "file"));
-
-                File file = new File(ShareProvider.shareDirectory(this), fileName);
-                try (OutputStream out = new FileOutputStream(file)) {
-                    api.download(url, out);
-                }
-                long size = file.length();
+                File file = downloadToCache(target, fullPath);
                 main.post(() -> {
-                    status.setText("已下载 " + fileName + "（" + formatSize(size) + "）");
-                    onFinished.run();
-                    offerDownloadedFile(file, fileName, status);
+                    fileDownloadInFlight = false;
+                    status.setText("已下载 " + file.getName() + "（" + formatSize(file.length()) + "）");
+                    shareFile(file);
                 });
             } catch (Exception exception) {
                 main.post(() -> {
+                    fileDownloadInFlight = false;
                     status.setText("下载失败：" + friendly(exception));
-                    onFinished.run();
                 });
             }
         });
     }
 
-    private void offerDownloadedFile(File file, String name, TextView status) {
-        new AlertDialog.Builder(this)
-                .setTitle(name)
-                .setMessage("已下载到应用缓存，" + formatSize(file.length()) + "。\n可以直接分享给其他应用，或保存到「下载/DSH」。")
-                .setPositiveButton("分享到其他应用", (dialog, which) -> shareFile(file))
-                .setNeutralButton("保存到下载", (dialog, which) -> saveToDownloads(file, name, status))
-                .setNegativeButton("关闭", null)
-                .show();
+    /** Only 分享 needs a local copy; 保存到下载 streams straight into MediaStore. */
+    private File downloadToCache(String target, String fullPath) throws Exception {
+        JSONObject signed = api.signFile(target, fullPath);
+        String url = signed.optString("url", "");
+        if (url.isEmpty()) {
+            throw new Exception("服务端没有返回下载地址");
+        }
+        String fileName = safeFileName(signed.optString("name", "file"));
+        File file = new File(ShareProvider.shareDirectory(this), fileName);
+        try (OutputStream out = new FileOutputStream(file)) {
+            api.download(url, out);
+        }
+        return file;
+    }
+
+    private void saveWorkspaceFile(String target, String fullPath, String fallbackName, TextView status) {
+        fileDownloadInFlight = true;
+        status.setText("正在保存到下载…");
+        io.execute(() -> {
+            Uri uri = null;
+            try {
+                JSONObject signed = api.signFile(target, fullPath);
+                String url = signed.optString("url", "");
+                if (url.isEmpty()) {
+                    throw new Exception("服务端没有返回下载地址");
+                }
+                String fileName = safeFileName(signed.optString("name", fallbackName));
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                    values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DSH");
+                    uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (uri == null) {
+                        throw new Exception("无法创建下载文件");
+                    }
+                    try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                        if (out == null) {
+                            throw new Exception("无法写入下载文件");
+                        }
+                        api.download(url, out);
+                    }
+                    main.post(() -> {
+                        fileDownloadInFlight = false;
+                        status.setText("已保存到 下载/DSH/" + fileName);
+                    });
+                } else {
+                    File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DSH");
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        throw new Exception("无法创建下载目录");
+                    }
+                    File file = new File(dir, fileName);
+                    try (OutputStream out = new FileOutputStream(file)) {
+                        api.download(url, out);
+                    }
+                    main.post(() -> {
+                        fileDownloadInFlight = false;
+                        status.setText("已保存到 " + file.getAbsolutePath());
+                    });
+                }
+            } catch (Exception exception) {
+                if (uri != null) {
+                    try {
+                        getContentResolver().delete(uri, null, null);
+                    } catch (Exception ignored) {
+                        // Best-effort cleanup of the half-written entry.
+                    }
+                }
+                main.post(() -> {
+                    fileDownloadInFlight = false;
+                    status.setText("保存失败：" + friendly(exception));
+                });
+            }
+        });
     }
 
     private void shareFile(File file) {
@@ -1085,52 +1147,6 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         } catch (Exception exception) {
             Toast.makeText(this, "分享失败：" + friendly(exception), Toast.LENGTH_LONG).show();
         }
-    }
-
-    private void saveToDownloads(File source, String name, TextView status) {
-        io.execute(() -> {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ContentValues values = new ContentValues();
-                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-                    values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
-                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DSH");
-                    Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                    if (uri == null) {
-                        throw new Exception("无法创建下载文件");
-                    }
-                    try (OutputStream out = getContentResolver().openOutputStream(uri);
-                         InputStream in = new FileInputStream(source)) {
-                        if (out == null) {
-                            throw new Exception("无法写入下载文件");
-                        }
-                        byte[] buffer = new byte[64 * 1024];
-                        int read;
-                        while ((read = in.read(buffer)) > 0) {
-                            out.write(buffer, 0, read);
-                        }
-                    }
-                    main.post(() -> status.setText("已保存到 下载/DSH/" + name));
-                } else {
-                    File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DSH");
-                    if (!dir.exists() && !dir.mkdirs()) {
-                        throw new Exception("无法创建下载目录");
-                    }
-                    File target = new File(dir, name);
-                    try (OutputStream out = new FileOutputStream(target);
-                         InputStream in = new FileInputStream(source)) {
-                        byte[] buffer = new byte[64 * 1024];
-                        int read;
-                        while ((read = in.read(buffer)) > 0) {
-                            out.write(buffer, 0, read);
-                        }
-                    }
-                    main.post(() -> status.setText("已保存到 " + target.getAbsolutePath()));
-                }
-            } catch (Exception exception) {
-                main.post(() -> status.setText("保存失败：" + friendly(exception)));
-            }
-        });
     }
 
     /** File names come from the host; strip anything that could escape the share directory. */
