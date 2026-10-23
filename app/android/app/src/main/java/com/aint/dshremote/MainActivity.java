@@ -2,7 +2,9 @@ package com.aint.dshremote;
 
 import android.app.Activity;
 import android.graphics.Color;
+import android.graphics.Insets;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -10,6 +12,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
@@ -134,7 +137,7 @@ public class MainActivity extends Activity {
             });
         });
 
-        setContentView(root);
+        setScreen(root);
     }
 
     // ---------- 会话 ----------
@@ -229,7 +232,7 @@ public class MainActivity extends Activity {
             showPairing();
         });
 
-        setContentView(root);
+        setScreen(root);
         load.run();
     }
 
@@ -297,7 +300,7 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        setContentView(root);
+        setScreen(root);
         approvalViews.clear();
         approvalBox.removeAllViews();
         loadMessages();
@@ -481,6 +484,34 @@ public class MainActivity extends Activity {
             holder.addView(view, params);
             return holder;
         }
+    }
+
+    /**
+     * Hosts one screen in an inset-aware container. targetSdk 35 enforces edge-to-edge,
+     * so `adjustResize` alone no longer lifts the composer above the keyboard; the IME
+     * inset has to be applied here explicitly.
+     */
+    private void setScreen(View content) {
+        FrameLayout container = new FrameLayout(this);
+        container.setBackgroundColor(Color.WHITE);
+        container.addView(content, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            container.setOnApplyWindowInsetsListener((view, windowInsets) -> {
+                Insets bars = windowInsets.getInsets(WindowInsets.Type.systemBars());
+                Insets ime = windowInsets.getInsets(WindowInsets.Type.ime());
+                view.setPadding(bars.left, bars.top, bars.right, Math.max(bars.bottom, ime.bottom));
+                if (ime.bottom > 0 && chatList != null && chatList.getCount() > 0) {
+                    chatList.setSelection(chatList.getCount() - 1);
+                }
+                return windowInsets;
+            });
+            container.requestApplyInsets();
+        }
+
+        setContentView(container);
     }
 
     private LinearLayout column(int padding) {
