@@ -141,6 +141,45 @@ public final class Api {
         request("/api/sessions/" + enc(sessionId) + "/cancel", "POST", null);
     }
 
+    /** Streams one file as an attachment prompt. Returns the server's JSON receipt. */
+    public JSONObject upload(String sessionId, String name, java.io.InputStream data, long size, String caption)
+            throws IOException {
+        String path = "/api/sessions/" + enc(sessionId) + "/upload?name=" + enc(name);
+        if (caption != null && !caption.isEmpty()) {
+            path += "&text=" + enc(caption);
+        }
+
+        HttpURLConnection connection = open(path, "POST");
+        try {
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/octet-stream");
+            if (size > 0) {
+                connection.setFixedLengthStreamingMode(size);
+            } else {
+                connection.setChunkedStreamingMode(64 * 1024);
+            }
+
+            try (java.io.OutputStream out = connection.getOutputStream()) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = data.read(buffer)) > 0) {
+                    out.write(buffer, 0, read);
+                }
+            }
+
+            int status = connection.getResponseCode();
+            String text = readAll(status >= 400 ? connection.getErrorStream() : connection.getInputStream());
+            if (status >= 400) {
+                throw new ApiException(status, text);
+            }
+            return text.isEmpty() ? new JSONObject() : new JSONObject(text);
+        } catch (JSONException error) {
+            throw new IOException("bad json: " + error.getMessage(), error);
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     public boolean answer(String approvalId, String outcome) throws IOException {
         try {
             JSONObject body = new JSONObject();
@@ -155,7 +194,7 @@ public final class Api {
     }
 
     /** Blocking SSE loop; call from a background thread. Reconnects until interrupted. */
-    public void streamEvents(FrameListener listener) {
+    public void streamEvents(Runnable onOpen, FrameListener listener) {
         while (!Thread.currentThread().isInterrupted()) {
             HttpURLConnection connection = null;
             try {
@@ -165,6 +204,7 @@ public final class Api {
                     Thread.sleep(3000);
                     continue;
                 }
+                onOpen.run();
                 BufferedReader reader = new BufferedReader(
                         new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
                 String line;
