@@ -94,6 +94,17 @@
 - `approval/request`（waterfall 事件）：返回 `allowed-once` / `rejected` 即接管，`next()` 交回后续回答者。
 - `user-questions/request`（waterfall 事件）：返回完整答案即接管。
 
+**已实测（2026-10-23）**：宿主侧把审批转发给浏览器的桥接器（`@deepseek-ai/dsh-api-remotes`）本身也是一个 `approval/request` 监听器，且按连接动态注册。以 `prepend: true` 注册的监听器排在它之前，真实派发时会被先调用、并可截断整条链：
+
+```
+hooks: [0] remoteApprovalAnswerer (prepend)  ← 本插件
+       [1] (anonymous)                        ← Remote 转发桥接器
+```
+
+动态验证：对一个临时会话真实派发一次 `approval/request`，本插件收到并返回 `rejected`，调用方立即拿到该结果，桥接器未被调用。
+
+**前提条件**：只有会话的审批策略为 `ask` 时才会走到 answerer 链。策略为 `never` 时 `approval.request()` 直接返回 `rejected`，不经过任何回答者——此时手机端无从审批。
+
 ### 6.2 状态机
 
 ```
@@ -218,7 +229,7 @@
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| waterfall 监听顺序未知 | 可能无法先于 DSH 自带 UI 接管审批 | P2 首先做实验验证，失败则改用其它钩子 |
+| waterfall 监听顺序 | ~~可能无法先于 DSH 自带 UI 接管审批~~ **已验证**：`prepend` 可排到转发桥接器之前并截断 | 保持 `prepend`，勿改为普通注册 |
 | `workspaceChanges.summary` 的变更集粒度未知 | 可能按回合粗粒度，误判"本轮修改" | P3 前实测；必要时退化为"确认优先" |
 | 安卓后台杀进程 | 长连接断开、消息丢失 | P4 前台服务 + 重连队列 |
 | 原生构建链依赖本机工具链 | WinUI 需要 Windows App SDK，安卓需要 SDK/JDK | 版本固定在仓库文档中；CI 后续补 |
