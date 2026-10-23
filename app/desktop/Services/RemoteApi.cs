@@ -236,5 +236,47 @@ public sealed class RemoteApi : IDisposable
         return value ?? throw new ApiException("empty-response", "服务端返回了空响应");
     }
 
+    public async Task<List<WorkspaceEntryDto>> ListWorkspaceAsync(string sessionId, string path, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/workspace?path={Uri.EscapeDataString(path)}",
+            cancellationToken);
+        var value = await ReadAsync<WorkspaceListDto>(response, cancellationToken);
+        return value.Entries;
+    }
+
+    public async Task<SignedFileDto> SignFileAsync(string sessionId, string path, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/files/sign",
+            new { path },
+            cancellationToken);
+        return await ReadAsync<SignedFileDto>(response, cancellationToken);
+    }
+
+    public async Task<byte[]> DownloadAsync(string urlPath, CancellationToken cancellationToken = default)
+    {
+        return await _http.GetByteArrayAsync(urlPath.TrimStart('/'), cancellationToken);
+    }
+
+    public async Task<object> UploadFileAsync(
+        string sessionId,
+        string fileName,
+        Stream content,
+        string? caption,
+        CancellationToken cancellationToken = default)
+    {
+        var query = $"api/sessions/{Uri.EscapeDataString(sessionId)}/upload?name={Uri.EscapeDataString(fileName)}";
+        if (!string.IsNullOrWhiteSpace(caption))
+        {
+            query += $"&text={Uri.EscapeDataString(caption)}";
+        }
+
+        using var body = new StreamContent(content);
+        body.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        using var response = await _http.PostAsync(query, body, cancellationToken);
+        return await ReadAsync<JsonElement>(response, cancellationToken);
+    }
+
     public void Dispose() => _http.Dispose();
 }

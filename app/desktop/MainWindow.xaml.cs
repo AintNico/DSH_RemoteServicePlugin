@@ -599,6 +599,141 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---------- 文件 ----------
+
+    private async void OnAttachClick(object sender, RoutedEventArgs e)
+    {
+        if (_api is null || _currentSessionId is null || _sending)
+        {
+            return;
+        }
+
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeFilter.Add("*");
+
+            var file = await picker.PickSingleFileAsync();
+            if (file is null)
+            {
+                return;
+            }
+
+            DetailStatus.Text = $"正在上传 {file.Name}…";
+            await using var stream = await file.OpenStreamForReadAsync();
+            await _api.UploadFileAsync(_currentSessionId, file.Name, stream, ComposerBox.Text?.Trim());
+            ComposerBox.Text = string.Empty;
+            DetailStatus.Text = $"已发送 {file.Name}";
+        }
+        catch (Exception ex)
+        {
+            DetailStatus.Text = $"上传失败：{ex.Message}";
+        }
+    }
+
+    private async void OnFilesClick(object sender, RoutedEventArgs e)
+    {
+        if (_api is null || _currentSessionId is null)
+        {
+            return;
+        }
+
+        var sessionId = _currentSessionId;
+        var pathBlock = new TextBlock { Text = ".", Opacity = 0.7, FontSize = 12 };
+        var statusBlock = new TextBlock { Text = string.Empty, Opacity = 0.8, FontSize = 12, TextWrapping = TextWrapping.Wrap };
+        var list = new ListView
+        {
+            Height = 380,
+            Width = 460,
+            IsItemClickEnabled = true,
+            SelectionMode = ListViewSelectionMode.None,
+        };
+
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(pathBlock);
+        content.Children.Add(list);
+        content.Children.Add(statusBlock);
+
+        var dialog = new ContentDialog
+        {
+            Title = "工作区文件",
+            Content = content,
+            CloseButtonText = "关闭",
+            XamlRoot = Root.XamlRoot,
+        };
+
+        var entries = new List<WorkspaceEntryDto>();
+
+        async Task LoadAsync(string path)
+        {
+            pathBlock.Text = path;
+            entries = await _api.ListWorkspaceAsync(sessionId, path);
+            list.ItemsSource = entries;
+        }
+
+        async Task DownloadAsync(string path)
+        {
+            try
+            {
+                statusBlock.Text = "正在准备下载…";
+                var signed = await _api.SignFileAsync(sessionId, path);
+                var bytes = await _api.DownloadAsync(signed.Url);
+
+                var directory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "DSH");
+                Directory.CreateDirectory(directory);
+                var target = Path.Combine(directory, signed.Name);
+                await File.WriteAllBytesAsync(target, bytes);
+                statusBlock.Text = $"已保存到 {target}";
+            }
+            catch (Exception ex)
+            {
+                statusBlock.Text = $"下载失败：{ex.Message}";
+            }
+        }
+
+        list.ItemClick += async (_, args) =>
+        {
+            if (args.ClickedItem is not WorkspaceEntryDto entry)
+            {
+                return;
+            }
+
+            if (entry.Directory)
+            {
+                var next = pathBlock.Text == "." ? entry.Name : $"{pathBlock.Text}/{entry.Name}";
+                try
+                {
+                    await LoadAsync(next);
+                    statusBlock.Text = string.Empty;
+                }
+                catch (Exception ex)
+                {
+                    statusBlock.Text = $"打开失败：{ex.Message}";
+                }
+            }
+            else
+            {
+                var path = pathBlock.Text == "." ? entry.Name : $"{pathBlock.Text}/{entry.Name}";
+                await DownloadAsync(path);
+            }
+        };
+
+        list.ItemTemplate = (DataTemplate)Root.Resources["WorkspaceEntryTemplate"];
+
+        try
+        {
+            await LoadAsync(".");
+        }
+        catch (Exception ex)
+        {
+            statusBlock.Text = $"读取失败：{ex.Message}";
+        }
+
+        await dialog.ShowAsync();
+    }
+
     // ---------- 工具方法 ----------
 
     private static string TitleOf(SessionDto session)

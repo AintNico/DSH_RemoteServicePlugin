@@ -6,6 +6,14 @@
     Title="DSH 远程">
 
     <Grid x:Name="Root">
+        <Grid.Resources>
+            <DataTemplate x:Key="WorkspaceEntryTemplate" x:DataType="models:WorkspaceEntryDto">
+                <StackPanel Padding="0,6" Spacing="2">
+                    <TextBlock Text="{x:Bind Display}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{x:Bind Detail}" FontSize="12" Opacity="0.6" />
+                </StackPanel>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="320" />
             <ColumnDefinition Width="*" />
@@ -155,6 +163,8 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBox
                         x:Name="ComposerBox"
@@ -163,12 +173,22 @@
                         TextWrapping="Wrap"
                         KeyDown="OnComposerKeyDown" />
                     <Button
-                        x:Name="SendButton"
+                        x:Name="AttachButton"
                         Grid.Column="1"
+                        Content="附文件"
+                        Click="OnAttachClick" />
+                    <Button
+                        x:Name="FilesButton"
+                        Grid.Column="2"
+                        Content="文件"
+                        Click="OnFilesClick" />
+                    <Button
+                        x:Name="SendButton"
+                        Grid.Column="3"
                         Content="发送"
                         Style="{StaticResource AccentButtonStyle}"
                         Click="OnSendClick" />
-                    <Button x:Name="StopButton" Grid.Column="2" Content="停止" Click="OnStopClick" />
+                    <Button x:Name="StopButton" Grid.Column="4" Content="停止" Click="OnStopClick" />
                 </Grid>
             </Grid>
         </Grid>
