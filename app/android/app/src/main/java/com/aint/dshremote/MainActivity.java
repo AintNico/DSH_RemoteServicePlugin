@@ -338,7 +338,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
-        titleBox.addView(label(sessionTitle == null ? "" : sessionTitle, 17, TEXT, true));
+        TextView titleView = label(sessionTitle == null ? "" : sessionTitle, 17, TEXT, true);
+        titleView.setSingleLine(true);
+        titleView.setEllipsize(TextUtils.TruncateAt.END);
+        titleBox.addView(titleView);
         chatStatus = label(LiveLink.get().connected() ? "已连接" : "连接中…", 11, MUTED, false);
         titleBox.addView(chatStatus);
         header.addView(titleBox, weight(1));
@@ -1059,7 +1062,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
             JSONObject message = messages.get(position);
             String role = message.optString("role");
-            bubble.setText(message.optString("text"));
+            String raw = message.optString("text");
+            if ("tool".equals(role)) {
+                bubble.setText(raw);
+            } else {
+                bubble.setText(Markdown.render(raw));
+            }
             bubble.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.78f));
 
             FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) bubble.getLayoutParams();
