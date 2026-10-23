@@ -142,14 +142,22 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             return;
         }
         String action = intent.getAction();
-        if (!Intent.ACTION_SEND.equals(action) && !Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+        // SEND/SEND_MULTIPLE is the system share sheet; VIEW is what QQ's "用其他应用打开" uses.
+        if (!Intent.ACTION_SEND.equals(action)
+                && !Intent.ACTION_SEND_MULTIPLE.equals(action)
+                && !Intent.ACTION_VIEW.equals(action)) {
             return;
         }
 
         Uri uri = null;
-        Object stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
-        if (stream instanceof Uri) {
-            uri = (Uri) stream;
+        if (Intent.ACTION_VIEW.equals(action)) {
+            uri = intent.getData();
+        }
+        if (uri == null) {
+            Object stream = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (stream instanceof Uri) {
+                uri = (Uri) stream;
+            }
         }
         if (uri == null && intent.getClipData() != null && intent.getClipData().getItemCount() > 0) {
             uri = intent.getClipData().getItemAt(0).getUri();
