@@ -1,6 +1,8 @@
 package com.aint.dshremote;
 
 import android.app.Activity;
+import android.app.Dialog;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
@@ -12,8 +14,10 @@ import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -21,19 +25,24 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -329,8 +338,13 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         titleBox.addView(chatStatus);
         header.addView(titleBox, weight(1));
 
+        Button files = button("文件", PANEL, ACCENT);
+        LinearLayout.LayoutParams filesParams = new LinearLayout.LayoutParams(dp(60), dp(40));
+        filesParams.rightMargin = dp(8);
+        header.addView(files, filesParams);
+
         Button stop = button("停止", PANEL, ACCENT);
-        header.addView(stop, new LinearLayout.LayoutParams(dp(72), dp(40)));
+        header.addView(stop, new LinearLayout.LayoutParams(dp(60), dp(40)));
         root.addView(header);
 
         View divider = new View(this);
@@ -387,6 +401,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }));
         send.setOnClickListener(v -> sendMessage());
         attachButton.setOnClickListener(v -> pickFile());
+        files.setOnClickListener(v -> showWorkspace());
 
         setScreen(root);
         approvalViews.clear();
@@ -562,6 +577,156 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     }
                     Toast.makeText(this, "上传失败：" + message, Toast.LENGTH_LONG).show();
                 });
+            }
+        });
+    }
+
+    // ---------- 工作区下载 ----------
+
+    private void showWorkspace() {
+        if (api == null || sessionId == null) {
+            return;
+        }
+        final String target = sessionId;
+
+        Dialog dialog = new Dialog(this);
+        LinearLayout box = column(16);
+
+        TextView pathView = label(".", 14, TEXT, true);
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(rows);
+
+        TextView status = label("", 12, MUTED, false);
+        LinearLayout actions = row();
+        Button up = button("上一级", PANEL, ACCENT);
+        Button close = button("关闭", PANEL, ACCENT);
+        LinearLayout.LayoutParams upParams = new LinearLayout.LayoutParams(0, dp(40), 1);
+        upParams.rightMargin = dp(8);
+        actions.addView(up, upParams);
+        actions.addView(close, new LinearLayout.LayoutParams(0, dp(40), 1));
+
+        box.addView(pathView);
+        box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(360)));
+        box.addView(status);
+        box.addView(actions);
+
+        dialog.setContentView(box);
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(roundRect(Color.WHITE, 16));
+            dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+        }
+
+        final String[] current = {"."};
+        final Runnable[] refresh = new Runnable[1];
+
+        refresh[0] = () -> {
+            final String path = current[0];
+            pathView.setText(path);
+            status.setText("读取中…");
+            io.execute(() -> {
+                try {
+                    JSONObject result = api.workspace(target, path);
+                    JSONArray entries = result.optJSONArray("entries");
+                    List<JSONObject> items = new ArrayList<>();
+                    for (int i = 0; i < (entries == null ? 0 : entries.length()); i++) {
+                        items.add(entries.getJSONObject(i));
+                    }
+                    main.post(() -> {
+                        rows.removeAllViews();
+                        if (items.isEmpty()) {
+                            rows.addView(label("（空目录）", 13, MUTED, false));
+                        }
+                        for (JSONObject entry : items) {
+                            final String name = entry.optString("name");
+                            final boolean directory = entry.optBoolean("directory");
+                            TextView rowView = label((directory ? "📁  " : "📄  ") + name, 14, TEXT, directory);
+                            rowView.setPadding(dp(4), dp(12), dp(4), dp(12));
+                            rowView.setBackground(new RippleDrawable(ColorStateList.valueOf(0x1F000000), null, null));
+                            rowView.setOnClickListener(v -> {
+                                if (directory) {
+                                    current[0] = ".".equals(path) ? name : path + "/" + name;
+                                    refresh[0].run();
+                                } else {
+                                    downloadWorkspaceFile(target, ".".equals(path) ? name : path + "/" + name, status);
+                                }
+                            });
+                            rows.addView(rowView);
+                        }
+                        status.setText(items.size() + " 项");
+                    });
+                } catch (Exception exception) {
+                    main.post(() -> status.setText(friendly(exception)));
+                }
+            });
+        };
+
+        up.setOnClickListener(v -> {
+            if (".".equals(current[0])) {
+                return;
+            }
+            int cut = current[0].lastIndexOf('/');
+            current[0] = cut > 0 ? current[0].substring(0, cut) : ".";
+            refresh[0].run();
+        });
+        close.setOnClickListener(v -> dialog.dismiss());
+
+        dialog.setOnDismissListener(d -> {
+            // Nothing to release; the work list is owned by the closure.
+        });
+        refresh[0].run();
+    }
+
+    private void downloadWorkspaceFile(String target, String path, TextView status) {
+        status.setText("正在准备下载…");
+        io.execute(() -> {
+            Uri uri = null;
+            try {
+                JSONObject signed = api.signFile(target, path);
+                String url = signed.optString("url", "");
+                String fileName = signed.optString("name", "file");
+                if (url.isEmpty()) {
+                    throw new Exception("服务端没有返回下载地址");
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContentValues values = new ContentValues();
+                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                    values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DSH");
+                    uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                    if (uri == null) {
+                        throw new Exception("无法创建下载文件");
+                    }
+                    try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                        if (out == null) {
+                            throw new Exception("无法写入下载文件");
+                        }
+                        api.download(url, out);
+                    }
+                    main.post(() -> status.setText("已保存到 下载/DSH/" + fileName));
+                } else {
+                    File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DSH");
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        throw new Exception("无法创建下载目录");
+                    }
+                    File file = new File(dir, fileName);
+                    try (OutputStream out = new FileOutputStream(file)) {
+                        api.download(url, out);
+                    }
+                    main.post(() -> status.setText("已保存到 " + file.getAbsolutePath()));
+                }
+            } catch (Exception exception) {
+                if (uri != null) {
+                    try {
+                        getContentResolver().delete(uri, null, null);
+                    } catch (Exception ignored) {
+                        // Best-effort cleanup of the pending entry.
+                    }
+                }
+                main.post(() -> status.setText("下载失败：" + friendly(exception)));
             }
         });
     }

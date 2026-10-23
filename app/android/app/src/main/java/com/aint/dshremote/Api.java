@@ -200,6 +200,42 @@ public final class Api {
         }
     }
 
+    /** Lists one directory of the Session workspace. */
+    public JSONObject workspace(String sessionId, String path) throws IOException {
+        return request("/api/sessions/" + enc(sessionId) + "/workspace?path=" + enc(path), "GET", null);
+    }
+
+    /** Asks the server for a short-lived signed URL for one workspace file. */
+    public JSONObject signFile(String sessionId, String path) throws IOException {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("path", path);
+            return request("/api/sessions/" + enc(sessionId) + "/files/sign", "POST", body);
+        } catch (JSONException error) {
+            throw new IOException(error);
+        }
+    }
+
+    /** Streams one signed download straight into {@code out}. */
+    public void download(String urlPath, java.io.OutputStream out) throws IOException {
+        HttpURLConnection connection = open(urlPath, "GET");
+        try {
+            int status = connection.getResponseCode();
+            if (status != 200) {
+                throw new ApiException(status, readAll(connection.getErrorStream()));
+            }
+            try (InputStream in = connection.getInputStream()) {
+                byte[] buffer = new byte[64 * 1024];
+                int read;
+                while ((read = in.read(buffer)) > 0) {
+                    out.write(buffer, 0, read);
+                }
+            }
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     /** Blocking SSE loop; call from a background thread. Reconnects until interrupted. */
     public void streamEvents(Runnable onOpen, FrameListener listener) {
         while (!Thread.currentThread().isInterrupted()) {
