@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<string, ApprovalDto> _approvals = new();
     private readonly Dictionary<string, TextBlock> _countdownLabels = new();
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private readonly TunnelService _tunnel = new();
     private CancellationTokenSource? _eventsCts;
     private string? _currentSessionId;
     private int _loadGeneration;
@@ -44,6 +45,7 @@ public sealed partial class MainWindow : Window
             _countdownTimer.Stop();
             _eventsCts?.Cancel();
             _api?.Dispose();
+            _tunnel.Dispose();
         };
     }
 
@@ -810,6 +812,122 @@ public sealed partial class MainWindow : Window
 
         await ReloadAsync();
         timer.Start();
+        await dialog.ShowAsync();
+    }
+
+    // ---------- 远程访问 ----------
+
+    /// <summary>
+    /// Starts an SSH reverse tunnel (localhost.run) in front of the local plugin. The phone
+    /// then points its server address at the https hostname; the token requirement is unchanged.
+    /// </summary>
+    private async void OnRemoteClick(object sender, RoutedEventArgs e)
+    {
+        var status = new TextBlock
+        {
+            Text = _tunnel.IsRunning ? "隧道运行中" : "未启动",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var urlBlock = new TextBlock
+        {
+            Text = _tunnel.PublicUrl ?? "—",
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 16,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        };
+        var hint = new TextBlock
+        {
+            Text = "手机端把「服务地址」改成这个 https 地址后重新配对即可。地址每次启动都会变，停止后失效；"
+                 + "隧道只转发到本机 127.0.0.1:7317，插件对带转发头的请求不再视为本机，所以手机仍然需要配对令牌。",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var toggle = new Button
+        {
+            Content = _tunnel.IsRunning ? "停止隧道" : "启动隧道",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        var copy = new Button { Content = "复制地址", IsEnabled = !string.IsNullOrEmpty(_tunnel.PublicUrl) };
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        buttons.Children.Add(toggle);
+        buttons.Children.Add(copy);
+
+        var stack = new StackPanel { Spacing = 10, Width = 460 };
+        stack.Children.Add(status);
+        stack.Children.Add(urlBlock);
+        stack.Children.Add(buttons);
+        stack.Children.Add(hint);
+
+        var dialog = new ContentDialog
+        {
+            Title = "远程访问（SSH 隧道）",
+            Content = stack,
+            CloseButtonText = "关闭",
+            XamlRoot = Root.XamlRoot,
+        };
+
+        void ApplyStatus(string text) => DispatcherQueue.TryEnqueue(() => status.Text = text);
+        void ApplyUrl(string? url) => DispatcherQueue.TryEnqueue(() =>
+        {
+            urlBlock.Text = string.IsNullOrEmpty(url) ? "—" : url;
+            copy.IsEnabled = !string.IsNullOrEmpty(url);
+        });
+
+        _tunnel.StatusChanged += ApplyStatus;
+        _tunnel.UrlChanged += ApplyUrl;
+        dialog.Closed += (_, _) =>
+        {
+            _tunnel.StatusChanged -= ApplyStatus;
+            _tunnel.UrlChanged -= ApplyUrl;
+        };
+
+        toggle.Click += async (_, _) =>
+        {
+            toggle.IsEnabled = false;
+            try
+            {
+                if (_tunnel.IsRunning)
+                {
+                    await _tunnel.StopAsync();
+                    toggle.Content = "启动隧道";
+                }
+                else
+                {
+                    if (!TunnelService.SshAvailable())
+                    {
+                        ApplyStatus("系统缺少 ssh 客户端：设置 → 可选功能 → 添加 OpenSSH 客户端");
+                        return;
+                    }
+                    await _tunnel.StartAsync();
+                    toggle.Content = _tunnel.IsRunning ? "停止隧道" : "启动隧道";
+                }
+            }
+            catch (Exception ex)
+            {
+                ApplyStatus($"隧道操作失败：{ex.Message}");
+            }
+            finally
+            {
+                toggle.IsEnabled = true;
+            }
+        };
+
+        copy.Click += (_, _) =>
+        {
+            if (string.IsNullOrEmpty(_tunnel.PublicUrl))
+            {
+                return;
+            }
+            var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            package.SetText(_tunnel.PublicUrl);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+        };
+
         await dialog.ShowAsync();
     }
 

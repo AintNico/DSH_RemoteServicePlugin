@@ -80,7 +80,10 @@
                         x:Name="ServerLabel"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Button Content="配对码" Click="OnPairingInfoClick" HorizontalAlignment="Left" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="配对码" Click="OnPairingInfoClick" />
+                        <Button Content="远程访问" Click="OnRemoteClick" />
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>
