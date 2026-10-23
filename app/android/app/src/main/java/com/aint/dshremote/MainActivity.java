@@ -87,6 +87,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private Button attachButton;
     private TextView sessionStatus;
 
+    private StringBuilder streamBuffer;
+    private JSONObject streamingMessage;
+
     private Drawable bubbleUser;
     private Drawable bubbleAssistant;
 
@@ -234,6 +237,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         sessionsVisible = true;
         chatList = null;
         chatAdapter = null;
+        streamingMessage = null;
+        streamBuffer = null;
 
         LinearLayout root = column(0);
 
@@ -390,6 +395,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         root.addView(composerRow);
 
         messages.clear();
+        streamingMessage = null;
+        streamBuffer = null;
         chatList.setAdapter(chatAdapter);
 
         stop.setOnClickListener(v -> io.execute(() -> {
@@ -736,10 +743,33 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     @Override
     public void onFrame(JSONObject frame) {
         String kind = frame.optString("kind");
+        if ("stream-start".equals(kind)) {
+            if (sessionId != null && sessionId.equals(frame.optString("sessionId"))) {
+                beginStream();
+            }
+            return;
+        }
+        if ("stream".equals(kind)) {
+            if (sessionId != null && sessionId.equals(frame.optString("sessionId"))) {
+                appendStream(frame.optString("text", ""));
+            }
+            return;
+        }
+        if ("stream-end".equals(kind)) {
+            if (sessionId != null && sessionId.equals(frame.optString("sessionId"))) {
+                endStream();
+            }
+            return;
+        }
+
         if ("message".equals(kind)) {
             if (sessionId != null && sessionId.equals(frame.optString("sessionId"))) {
                 long seq = frame.optLong("seq", 0);
                 if (seq > lastSeq) {
+                    // The committed copy replaces the live stream, so drop the placeholder.
+                    if ("assistant".equals(frame.optString("role"))) {
+                        removeStreamingPlaceholder();
+                    }
                     lastSeq = seq;
                     messages.add(frame);
                     if (chatAdapter != null) {
@@ -757,6 +787,61 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             if (view != null && approvalBox != null) {
                 approvalBox.removeView(view);
             }
+        }
+    }
+
+    private void beginStream() {
+        if (chatAdapter == null) {
+            return;
+        }
+        removeStreamingPlaceholder();
+        streamBuffer = new StringBuilder();
+        streamingMessage = new JSONObject();
+        try {
+            streamingMessage.put("kind", "message");
+            streamingMessage.put("role", "assistant");
+            streamingMessage.put("sessionId", sessionId);
+            streamingMessage.put("seq", Long.MAX_VALUE);
+            streamingMessage.put("text", "");
+        } catch (Exception ignored) {
+            // A synthetic object cannot fail here, but never let it break the stream.
+        }
+        messages.add(streamingMessage);
+        chatAdapter.notifyDataSetChanged();
+        scrollToBottom();
+    }
+
+    private void appendStream(String text) {
+        if (streamingMessage == null) {
+            beginStream();
+            if (streamingMessage == null) {
+                return;
+            }
+        }
+        streamBuffer.append(text);
+        try {
+            streamingMessage.put("text", streamBuffer.toString());
+        } catch (Exception ignored) {
+            // Ignore a failed update; the committed message still arrives.
+        }
+        if (chatAdapter != null) {
+            chatAdapter.notifyDataSetChanged();
+            scrollToBottom();
+        }
+    }
+
+    private void endStream() {
+        removeStreamingPlaceholder();
+        if (chatAdapter != null) {
+            chatAdapter.notifyDataSetChanged();
+        }
+    }
+
+    private void removeStreamingPlaceholder() {
+        if (streamingMessage != null) {
+            messages.remove(streamingMessage);
+            streamingMessage = null;
+            streamBuffer = null;
         }
     }
 

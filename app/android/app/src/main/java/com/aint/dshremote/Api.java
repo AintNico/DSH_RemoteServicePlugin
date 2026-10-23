@@ -242,7 +242,8 @@ public final class Api {
             HttpURLConnection connection = null;
             try {
                 connection = open("/api/events", "GET");
-                connection.setReadTimeout(120000);
+                // The server pings every 20s; a stalled read means the link is half-open.
+                connection.setReadTimeout(45000);
                 if (connection.getResponseCode() != 200) {
                     Thread.sleep(3000);
                     continue;
