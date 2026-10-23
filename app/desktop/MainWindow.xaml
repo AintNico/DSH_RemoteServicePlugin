@@ -17,68 +17,68 @@
             Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="0,0,1,0">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
 
-            <Grid Padding="16,14">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBlock Text="会话" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
-                <ProgressRing x:Name="Busy" Grid.Column="1" IsActive="False" Width="16" Height="16" Margin="8,0" />
-                <Button x:Name="RefreshButton" Grid.Column="2" Content="刷新" Click="OnRefreshClick" />
+                <Grid Padding="16,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="会话" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                    <ProgressRing x:Name="Busy" Grid.Column="1" IsActive="False" Width="16" Height="16" Margin="8,0" />
+                    <Button x:Name="RefreshButton" Grid.Column="2" Content="刷新" Click="OnRefreshClick" />
+                </Grid>
+
+                <ListView
+                    x:Name="SessionList"
+                    Grid.Row="1"
+                    SelectionMode="Single"
+                    SelectionChanged="OnSessionSelectionChanged">
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="models:SessionItem">
+                            <Grid Padding="0,8" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    Text="{x:Bind Dot}"
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBlock
+                                        Text="{x:Bind Title}"
+                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        Text="{x:Bind Subtitle}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <StackPanel Grid.Row="2" Padding="16,12" Spacing="6">
+                    <TextBlock
+                        x:Name="ServerLabel"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Button Content="重新配对" Click="OnRepairClick" HorizontalAlignment="Left" />
+                </StackPanel>
             </Grid>
-
-            <ListView
-                x:Name="SessionList"
-                Grid.Row="1"
-                SelectionMode="Single"
-                SelectionChanged="OnSessionSelectionChanged">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="models:SessionItem">
-                        <Grid Padding="0,8" ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                Text="{x:Bind Dot}"
-                                VerticalAlignment="Center"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                            <StackPanel Grid.Column="1" Spacing="2">
-                                <TextBlock
-                                    Text="{x:Bind Title}"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    Text="{x:Bind Subtitle}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <StackPanel Grid.Row="2" Padding="16,12" Spacing="6">
-                <TextBlock
-                    x:Name="ServerLabel"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Button Content="重新配对" Click="OnRepairClick" HorizontalAlignment="Left" />
-            </StackPanel>
-        </Grid>
         </Border>
 
         <!-- 会话详情 -->
-        <Grid Grid.Column="1" Padding="28">
+        <Grid Grid.Column="1" Padding="28,20,28,20">
             <StackPanel
                 x:Name="EmptyState"
                 VerticalAlignment="Center"
@@ -86,33 +86,61 @@
                 Spacing="6">
                 <TextBlock Text="选择一个会话" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
                 <TextBlock
-                    Text="消息收发将在 P1 接入"
+                    Text="左侧列表会随电脑端的变化刷新"
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     HorizontalAlignment="Center" />
             </StackPanel>
 
-            <StackPanel x:Name="DetailPanel" Visibility="Collapsed" Spacing="10">
-                <TextBlock x:Name="DetailTitle" Style="{StaticResource TitleTextBlockStyle}" />
-                <TextBlock
-                    x:Name="DetailPath"
-                    Style="{StaticResource BodyTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextWrapping="Wrap" />
-                <TextBlock x:Name="DetailStatus" Style="{StaticResource BodyTextBlockStyle}" />
-                <Border
-                    Padding="16"
-                    CornerRadius="8"
-                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1">
+            <Grid x:Name="DetailPanel" Visibility="Collapsed" RowSpacing="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Spacing="6">
+                    <TextBlock x:Name="DetailTitle" Style="{StaticResource TitleTextBlockStyle}" TextTrimming="CharacterEllipsis" />
                     <TextBlock
-                        Text="该会话的消息流会在 P1 出现在这里。"
+                        x:Name="DetailPath"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
-                </Border>
-            </StackPanel>
+                    <TextBlock
+                        x:Name="DetailStatus"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
+                <ScrollViewer
+                    x:Name="MessageScroll"
+                    Grid.Row="1"
+                    VerticalScrollBarVisibility="Auto"
+                    VerticalScrollMode="Auto">
+                    <StackPanel x:Name="MessagePanel" Spacing="10" Padding="0,4,10,4" />
+                </ScrollViewer>
+
+                <Grid Grid.Row="2" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox
+                        x:Name="ComposerBox"
+                        PlaceholderText="输入消息，Enter 发送"
+                        MaxHeight="120"
+                        TextWrapping="Wrap"
+                        KeyDown="OnComposerKeyDown" />
+                    <Button
+                        x:Name="SendButton"
+                        Grid.Column="1"
+                        Content="发送"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="OnSendClick" />
+                    <Button x:Name="StopButton" Grid.Column="2" Content="停止" Click="OnStopClick" />
+                </Grid>
+            </Grid>
         </Grid>
 
         <!-- 配对遮罩 -->

@@ -66,6 +66,85 @@ public sealed class RemoteApi : IDisposable
         return result.Sessions;
     }
 
+    public async Task<MessagesDto> GetMessagesAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/messages", cancellationToken);
+        return await ReadAsync<MessagesDto>(response, cancellationToken);
+    }
+
+    public async Task SendPromptAsync(string sessionId, string text, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/prompt",
+            new { text },
+            cancellationToken);
+        await ReadAsync<PromptResultDto>(response, cancellationToken);
+    }
+
+    public async Task CancelTurnAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/cancel", null, cancellationToken);
+        await ReadAsync<PromptResultDto>(response, cancellationToken);
+    }
+
+    /// <summary>Consumes the server-sent event feed until cancellation, reconnecting on failure.</summary>
+    public async Task StreamEventsAsync(Action<MessageDto> onMessage, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, "api/events");
+                using var response = await _http.SendAsync(
+                    request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+                    continue;
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                using var reader = new StreamReader(stream);
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    var line = await reader.ReadLineAsync(cancellationToken);
+                    if (line is null) break;
+                    if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
+
+                    MessageDto? message = null;
+                    try
+                    {
+                        message = JsonSerializer.Deserialize<MessageDto>(line[6..], Options);
+                    }
+                    catch (JsonException)
+                    {
+                        // Ignore a malformed frame rather than dropping the connection.
+                    }
+                    if (message is not null) onMessage(message);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception)
+            {
+                // Transient network failure: back off and resubscribe.
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+    }
+
     private async Task<T> ReadAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (!response.IsSuccessStatusCode)

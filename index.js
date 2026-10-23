@@ -1,7 +1,7 @@
 import { startRemoteService } from './lib/service.js'
 
-/** `sessionController` backs the Session list; every DSH profile that serves the API mounts it. */
-export const inject = ['sessionController']
+/** The Session list, message history and prompt admission this bundle builds on. */
+export const inject = ['sessionController', 'sessionQuery']
 
 const DEFAULTS = {
   port: 7317,
