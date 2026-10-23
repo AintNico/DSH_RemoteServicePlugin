@@ -89,8 +89,40 @@ public sealed class RemoteApi : IDisposable
         await ReadAsync<PromptResultDto>(response, cancellationToken);
     }
 
+    public async Task<bool> AnswerApprovalAsync(string id, string outcome, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/approvals/{Uri.EscapeDataString(id)}/answer",
+            new { outcome },
+            cancellationToken);
+        if (response.StatusCode == HttpStatusCode.Conflict)
+        {
+            return false;
+        }
+        await ReadAsync<JsonElement>(response, cancellationToken);
+        return true;
+    }
+
+    public async Task<string> GetApprovalPolicyAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/approval-policy", cancellationToken);
+        var value = await ReadAsync<PolicyDto>(response, cancellationToken);
+        return value.Policy;
+    }
+
+    public async Task<string> SetApprovalPolicyAsync(string sessionId, string policy, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync(
+            $"api/sessions/{Uri.EscapeDataString(sessionId)}/approval-policy",
+            new { policy },
+            cancellationToken);
+        var value = await ReadAsync<PolicyDto>(response, cancellationToken);
+        return value.Policy;
+    }
+
     /// <summary>Consumes the server-sent event feed until cancellation, reconnecting on failure.</summary>
-    public async Task StreamEventsAsync(Action<MessageDto> onMessage, CancellationToken cancellationToken)
+    public async Task StreamEventsAsync(Action<EventFrame> onFrame, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -113,16 +145,8 @@ public sealed class RemoteApi : IDisposable
                     if (line is null) break;
                     if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
 
-                    MessageDto? message = null;
-                    try
-                    {
-                        message = JsonSerializer.Deserialize<MessageDto>(line[6..], Options);
-                    }
-                    catch (JsonException)
-                    {
-                        // Ignore a malformed frame rather than dropping the connection.
-                    }
-                    if (message is not null) onMessage(message);
+                    var frame = DecodeFrame(line[6..]);
+                    if (frame is not null) onFrame(frame);
                 }
             }
             catch (OperationCanceledException)
@@ -142,6 +166,39 @@ public sealed class RemoteApi : IDisposable
             {
                 return;
             }
+        }
+    }
+
+    private static EventFrame? DecodeFrame(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            if (!document.RootElement.TryGetProperty("kind", out var kindElement)) return null;
+
+            return kindElement.GetString() switch
+            {
+                "message" => new EventFrame
+                {
+                    Kind = "message",
+                    Message = JsonSerializer.Deserialize<MessageDto>(json, Options),
+                },
+                "approval" => new EventFrame
+                {
+                    Kind = "approval",
+                    Approval = JsonSerializer.Deserialize<ApprovalDto>(json, Options),
+                },
+                "approval-resolved" => new EventFrame
+                {
+                    Kind = "approval-resolved",
+                    Resolved = JsonSerializer.Deserialize<ApprovalResolvedDto>(json, Options),
+                },
+                _ => null,
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

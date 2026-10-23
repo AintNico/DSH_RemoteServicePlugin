@@ -17,11 +17,15 @@ public sealed partial class MainWindow : Window
     private AppSettings _settings = SettingsStore.Load();
     private RemoteApi? _api;
     private readonly ObservableCollection<SessionItem> _sessions = new();
+    private readonly Dictionary<string, ApprovalDto> _approvals = new();
+    private readonly Dictionary<string, TextBlock> _countdownLabels = new();
+    private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     private CancellationTokenSource? _eventsCts;
     private string? _currentSessionId;
     private int _loadGeneration;
     private bool _busy;
     private bool _sending;
+    private bool _suppressToggle;
 
     public MainWindow()
     {
@@ -32,6 +36,8 @@ public sealed partial class MainWindow : Window
         ServerBox.Text = _settings.ServerUrl;
         DeviceBox.Text = Environment.MachineName;
         ServerLabel.Text = _settings.ServerUrl;
+        _countdownTimer.Tick += (_, _) => TickCountdowns();
+        _countdownTimer.Start();
 
         if (string.IsNullOrEmpty(_settings.Token))
         {
@@ -44,6 +50,7 @@ public sealed partial class MainWindow : Window
 
         Closed += (_, _) =>
         {
+            _countdownTimer.Stop();
             _eventsCts?.Cancel();
             _api?.Dispose();
         };
@@ -156,7 +163,9 @@ public sealed partial class MainWindow : Window
         _api = null;
         _currentSessionId = null;
         _sessions.Clear();
+        _approvals.Clear();
         MessagePanel.Children.Clear();
+        RenderApprovals();
         DetailPanel.Visibility = Visibility.Collapsed;
         EmptyState.Visibility = Visibility.Visible;
         ShowPairOverlay(true);
@@ -233,6 +242,8 @@ public sealed partial class MainWindow : Window
         SendButton.IsEnabled = true;
 
         await LoadMessagesAsync(item.Id);
+        await LoadPolicyAsync(item.Id);
+        RenderApprovals();
     }
 
     private async Task LoadMessagesAsync(string sessionId)
@@ -265,6 +276,52 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---------- 审批策略 ----------
+
+    private async Task LoadPolicyAsync(string sessionId)
+    {
+        if (_api is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var policy = await _api.GetApprovalPolicyAsync(sessionId);
+            _suppressToggle = true;
+            ApprovalToggle.IsOn = policy == "ask";
+            _suppressToggle = false;
+        }
+        catch (Exception ex)
+        {
+            DetailStatus.Text = $"审批策略读取失败：{ex.Message}";
+        }
+    }
+
+    private async void OnApprovalToggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressToggle || _api is null || _currentSessionId is null)
+        {
+            return;
+        }
+
+        var desired = ApprovalToggle.IsOn ? "ask" : "never";
+        try
+        {
+            var applied = await _api.SetApprovalPolicyAsync(_currentSessionId, desired);
+            _suppressToggle = true;
+            ApprovalToggle.IsOn = applied == "ask";
+            _suppressToggle = false;
+        }
+        catch (Exception ex)
+        {
+            DetailStatus.Text = $"审批策略切换失败：{ex.Message}";
+            _suppressToggle = true;
+            ApprovalToggle.IsOn = !ApprovalToggle.IsOn;
+            _suppressToggle = false;
+        }
+    }
+
     // ---------- 实时流 ----------
 
     private void StartEventStream()
@@ -281,20 +338,139 @@ public sealed partial class MainWindow : Window
         _ = Task.Run(async () =>
         {
             await api.StreamEventsAsync(
-                message => DispatcherQueue.TryEnqueue(() => OnLiveMessage(message)),
+                frame => DispatcherQueue.TryEnqueue(() => OnFrame(frame)),
                 cts.Token);
         });
     }
 
-    private void OnLiveMessage(MessageDto message)
+    private void OnFrame(EventFrame frame)
     {
-        if (_currentSessionId is null || message.SessionId != _currentSessionId)
+        switch (frame.Kind)
+        {
+            case "message" when frame.Message is not null:
+                if (_currentSessionId is not null && frame.Message.SessionId == _currentSessionId)
+                {
+                    AddBubble(frame.Message);
+                    ScrollToBottom();
+                }
+                break;
+
+            case "approval" when frame.Approval is not null:
+                _approvals[frame.Approval.Id] = frame.Approval;
+                RenderApprovals();
+                break;
+
+            case "approval-resolved" when frame.Resolved is not null:
+                _approvals.Remove(frame.Resolved.Id);
+                RenderApprovals();
+                break;
+        }
+    }
+
+    // ---------- 审批卡片 ----------
+
+    private void RenderApprovals()
+    {
+        ApprovalPanel.Children.Clear();
+        _countdownLabels.Clear();
+
+        foreach (var approval in _approvals.Values
+                     .Where(item => item.SessionId == _currentSessionId)
+                     .OrderBy(item => item.ExpiresAt))
+        {
+            ApprovalPanel.Children.Add(BuildApprovalCard(approval));
+        }
+
+        ApprovalPanel.Visibility = ApprovalPanel.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        TickCountdowns();
+    }
+
+    private Border BuildApprovalCard(ApprovalDto approval)
+    {
+        var title = new TextBlock
+        {
+            Text = $"待审批 · {approval.ToolName ?? "工具调用"}",
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+        };
+
+        var reason = new TextBlock
+        {
+            Text = approval.Headline,
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var countdown = new TextBlock
+        {
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+        };
+        _countdownLabels[approval.Id] = countdown;
+
+        var allow = new Button
+        {
+            Content = "允许一次",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        allow.Click += async (_, _) => await AnswerAsync(approval.Id, "allowed-once");
+
+        var deny = new Button { Content = "拒绝" };
+        deny.Click += async (_, _) => await AnswerAsync(approval.Id, "rejected");
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        buttons.Children.Add(allow);
+        buttons.Children.Add(deny);
+
+        var content = new StackPanel { Spacing = 6 };
+        content.Children.Add(title);
+        content.Children.Add(reason);
+        content.Children.Add(countdown);
+        content.Children.Add(buttons);
+
+        return new Border
+        {
+            Padding = new Thickness(12),
+            CornerRadius = new CornerRadius(8),
+            Background = ThemeBrush("CardBackgroundFillColorDefaultBrush", Colors.WhiteSmoke),
+            BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush", Colors.LightGray),
+            BorderThickness = new Thickness(1),
+            Child = content,
+        };
+    }
+
+    private async Task AnswerAsync(string id, string outcome)
+    {
+        if (_api is null)
         {
             return;
         }
 
-        AddBubble(message);
-        ScrollToBottom();
+        try
+        {
+            await _api.AnswerApprovalAsync(id, outcome);
+            _approvals.Remove(id);
+            RenderApprovals();
+        }
+        catch (Exception ex)
+        {
+            DetailStatus.Text = $"审批提交失败：{ex.Message}";
+        }
+    }
+
+    private void TickCountdowns()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        foreach (var (id, label) in _countdownLabels)
+        {
+            var approval = _approvals.GetValueOrDefault(id);
+            if (approval is null)
+            {
+                continue;
+            }
+            var remaining = approval.ExpiresAt - now;
+            label.Text = remaining > 0
+                ? $"{(int)Math.Ceiling(remaining / 1000.0)} 秒内未处理将回退到电脑端"
+                : "已回退到电脑端";
+        }
     }
 
     // ---------- 渲染 ----------
