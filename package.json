@@ -1,0 +1,25 @@
+{
+  "name": "@local/dsh-remote-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Remote control of DSH from an Android phone: messages, approvals and files.",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "web",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

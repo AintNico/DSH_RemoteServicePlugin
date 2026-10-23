@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DSH 远程 · 配对</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14161b; --panel: #1c1f26; --line: #2a2f3a;
+        --text: #e6e9ef; --muted: #8b93a3; --accent: #4c8dff; --danger: #ff5c5c;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; padding: 40px 24px; background: var(--bg); color: var(--text);
+        font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        display: flex; justify-content: center;
+      }
+      .wrap { width: 100%; max-width: 560px; }
+      h1 { font-size: 20px; margin: 0 0 4px; }
+      .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; margin-bottom: 16px; }
+      .label { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+      .code {
+        font: 600 44px/1.2 ui-monospace, Consolas, monospace; letter-spacing: 8px;
+        color: var(--accent); user-select: all;
+      }
+      .countdown { color: var(--muted); font-size: 13px; margin-top: 6px; }
+      .stale { color: var(--danger); }
+      .url { font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; color: var(--text); }
+      button {
+        padding: 10px 16px; font-size: 14px; border-radius: 10px; cursor: pointer;
+        background: transparent; color: var(--text); border: 1px solid var(--line);
+      }
+      button:hover { border-color: var(--accent); }
+      .device { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+      .device:last-child { border-bottom: 0; }
+      .device .name { flex: 1; }
+      .device .meta { font-size: 12px; color: var(--muted); }
+      .empty { color: var(--muted); font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>DSH 远程 · 配对</h1>
+      <div class="sub">在手机浏览器打开下面的地址，输入配对码完成绑定。</div>
+
+      <div class="card">
+        <div class="label">手机访问地址</div>
+        <div id="url" class="url">…</div>
+      </div>
+
+      <div class="card">
+        <div class="label">配对码</div>
+        <div id="code" class="code">------</div>
+        <div id="countdown" class="countdown"></div>
+        <div style="margin-top:16px">
+          <button id="regenerate">重新生成</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="label">已配对设备</div>
+        <div id="devices"></div>
+      </div>
+    </div>
+
+    <script>
+      let currentCode = null
+      let expiry = 0
+
+      async function get(path, options) {
+        const response = await fetch(path, options)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return response.json()
+      }
+
+      function tick() {
+        if (!expiry) return
+        const left = Math.max(0, expiry - Date.now())
+        const el = document.getElementById('countdown')
+        if (left <= 0) {
+          el.textContent = '已过期，请重新生成'
+          el.className = 'countdown stale'
+          document.getElementById('code').textContent = '------'
+          return
+        }
+        const minutes = Math.floor(left / 60000)
+        const seconds = Math.floor((left % 60000) / 1000)
+        el.textContent = `剩余 ${minutes}:${String(seconds).padStart(2, '0')}`
+        el.className = 'countdown'
+      }
+
+      function renderDevices(devices) {
+        const container = document.getElementById('devices')
+        if (!devices.length) {
+          container.innerHTML = '<div class="empty">还没有设备配对</div>'
+          return
+        }
+        container.innerHTML = ''
+        for (const device of devices) {
+          const row = document.createElement('div')
+          row.className = 'device'
+          const name = document.createElement('div')
+          name.className = 'name'
+          name.innerHTML = `<div>${device.name}</div>
+            <div class="meta">最近活跃 ${new Date(device.lastSeenAt).toLocaleString()}</div>`
+          const button = document.createElement('button')
+          button.textContent = '吊销'
+          button.addEventListener('click', async () => {
+            await fetch('/api/devices/revoke', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: device.id }),
+            })
+            refresh()
+          })
+          row.append(name, button)
+          container.append(row)
+        }
+      }
+
+      async function refresh() {
+        try {
+          const data = await get('/api/pairing')
+          if (data.pairing) {
+            if (data.pairing.code !== currentCode) {
+              currentCode = data.pairing.code
+              document.getElementById('code').textContent = data.pairing.code
+            }
+            expiry = data.pairing.expiresAt
+          } else {
+            currentCode = null
+            expiry = 0
+            document.getElementById('code').textContent = '------'
+            document.getElementById('countdown').textContent = '当前没有有效的配对码'
+          }
+          renderDevices(data.devices || [])
+        } catch {
+          document.getElementById('countdown').textContent = '无法连接插件服务'
+        }
+      }
+
+      document.getElementById('regenerate').addEventListener('click', async () => {
+        await fetch('/api/pairing/regenerate', { method: 'POST' })
+        refresh()
+      })
+
+      get('/api/info').then((info) => {
+        document.getElementById('url').textContent = info.lanUrl || '未知'
+      }).catch(() => {
+        document.getElementById('url').textContent = '无法读取'
+      })
+
+      refresh()
+      setInterval(tick, 1000)
+      setInterval(refresh, 3000)
+    </script>
+  </body>
+</html>

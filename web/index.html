@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#14161b" />
+    <title>DSH 远程</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14161b;
+        --panel: #1c1f26;
+        --line: #2a2f3a;
+        --text: #e6e9ef;
+        --muted: #8b93a3;
+        --accent: #4c8dff;
+        --danger: #ff5c5c;
+        --ok: #39c07a;
+      }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 15px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+      }
+      header {
+        position: sticky; top: 0; z-index: 10;
+        display: flex; align-items: center; gap: 10px;
+        padding: 14px 16px;
+        background: color-mix(in srgb, var(--bg) 88%, transparent);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--line);
+      }
+      header h1 { font-size: 17px; margin: 0; font-weight: 600; flex: 1; }
+      .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+      .badge.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+      main { padding: 16px; }
+      .card {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+        padding: 16px; margin-bottom: 12px;
+      }
+      .muted { color: var(--muted); font-size: 13px; }
+      label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 6px; }
+      input {
+        width: 100%; padding: 12px 14px; font-size: 16px; color: var(--text);
+        background: #0f1116; border: 1px solid var(--line); border-radius: 10px; outline: none;
+      }
+      input:focus { border-color: var(--accent); }
+      button {
+        width: 100%; margin-top: 14px; padding: 13px; font-size: 16px; font-weight: 600;
+        color: #fff; background: var(--accent); border: 0; border-radius: 12px;
+      }
+      button:disabled { opacity: .5; }
+      button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
+      .session {
+        display: flex; align-items: center; gap: 10px;
+        padding: 14px 4px; border-bottom: 1px solid var(--line);
+      }
+      .session:last-child { border-bottom: 0; }
+      .session .title { flex: 1; min-width: 0; }
+      .session .path { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+      .dot.running { background: var(--ok); }
+      .empty { text-align: center; color: var(--muted); padding: 32px 0; }
+      .error { color: var(--danger); font-size: 13px; margin-top: 10px; min-height: 18px; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>DSH 远程</h1>
+      <span id="status" class="badge">未连接</span>
+    </header>
+
+    <main>
+      <section id="pair-view" class="card hidden">
+        <div class="muted">
+          在电脑上打开 <code>http://127.0.0.1:7317/desktop</code> 查看配对码，然后输入到这里。
+        </div>
+        <label for="code">配对码</label>
+        <input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />
+        <label for="device">设备名称</label>
+        <input id="device" maxlength="64" placeholder="我的手机" />
+        <button id="pair">配对</button>
+        <div id="pair-error" class="error"></div>
+      </section>
+
+      <section id="sessions-view" class="hidden">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <strong>会话</strong>
+            <button id="refresh" class="ghost" style="width:auto;margin:0;padding:8px 14px;font-size:14px">刷新</button>
+          </div>
+          <div id="sessions"></div>
+        </div>
+        <button id="forget" class="ghost">解除本机配对</button>
+      </section>
+    </main>
+
+    <script>
+      const TOKEN_KEY = 'dsh-remote-token'
+      const statusEl = document.getElementById('status')
+      const pairView = document.getElementById('pair-view')
+      const sessionsView = document.getElementById('sessions-view')
+      const sessionsEl = document.getElementById('sessions')
+
+      const token = () => localStorage.getItem(TOKEN_KEY)
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'content-type': 'application/json',
+            ...(token() ? { authorization: `Bearer ${token()}` } : {}),
+            ...(options.headers || {}),
+          },
+        })
+        const data = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const error = new Error(data.error || `HTTP ${response.status}`)
+          error.status = response.status
+          throw error
+        }
+        return data
+      }
+
+      function setStatus(text, ok) {
+        statusEl.textContent = text
+        statusEl.className = ok ? 'badge on' : 'badge'
+      }
+
+      function formatTime(ts) {
+        if (!ts) return ''
+        const date = new Date(ts)
+        const diff = (Date.now() - date.getTime()) / 60000
+        if (diff < 1) return '刚刚'
+        if (diff < 60) return `${Math.floor(diff)} 分钟前`
+        if (diff < 1440) return `${Math.floor(diff / 60)} 小时前`
+        return `${date.getMonth() + 1}/${date.getDate()}`
+      }
+
+      function renderSessions(sessions) {
+        if (!sessions.length) {
+          sessionsEl.innerHTML = '<div class="empty">还没有会话</div>'
+          return
+        }
+        sessionsEl.innerHTML = ''
+        for (const session of sessions) {
+          const row = document.createElement('div')
+          row.className = 'session'
+          const dot = document.createElement('span')
+          dot.className = session.running ? 'dot running' : 'dot'
+          const title = document.createElement('div')
+          title.className = 'title'
+          title.innerHTML = `<div>${session.running ? '运行中' : '空闲'}</div>
+            <div class="path">${session.cwd || '未知目录'} · ${formatTime(session.updatedAt)}</div>`
+          row.append(dot, title)
+          sessionsEl.append(row)
+        }
+      }
+
+      async function loadSessions() {
+        try {
+          const data = await api('/api/sessions')
+          renderSessions(data.sessions || [])
+          setStatus('已连接', true)
+        } catch (error) {
+          if (error.status === 401) {
+            localStorage.removeItem(TOKEN_KEY)
+            showPairing()
+            return
+          }
+          setStatus('连接失败', false)
+        }
+      }
+
+      function showPairing() {
+        pairView.classList.remove('hidden')
+        sessionsView.classList.add('hidden')
+        setStatus('未配对', false)
+      }
+
+      function showSessions() {
+        pairView.classList.add('hidden')
+        sessionsView.classList.remove('hidden')
+        loadSessions()
+      }
+
+      document.getElementById('pair').addEventListener('click', async () => {
+        const button = document.getElementById('pair')
+        const errorEl = document.getElementById('pair-error')
+        errorEl.textContent = ''
+        button.disabled = true
+        try {
+          const data = await api('/api/pair', {
+            method: 'POST',
+            body: JSON.stringify({
+              code: document.getElementById('code').value.trim(),
+              deviceName: document.getElementById('device').value.trim() || 'Android 手机',
+            }),
+          })
+          localStorage.setItem(TOKEN_KEY, data.token)
+          showSessions()
+        } catch (error) {
+          const message = {
+            'bad-code': '配对码不正确',
+            expired: '配对码已过期，请在电脑上重新打开配对页',
+            'too-many-attempts': '尝试次数过多，请稍后再试',
+          }[error.message] || `配对失败：${error.message}`
+          errorEl.textContent = message
+        } finally {
+          button.disabled = false
+        }
+      })
+
+      document.getElementById('refresh').addEventListener('click', loadSessions)
+
+      document.getElementById('forget').addEventListener('click', () => {
+        localStorage.removeItem(TOKEN_KEY)
+        showPairing()
+      })
+
+      if (token()) showSessions()
+      else showPairing()
+    </script>
+  </body>
+</html>
