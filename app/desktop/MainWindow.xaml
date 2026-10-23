@@ -80,10 +80,7 @@
                         x:Name="ServerLabel"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                        <Button Content="配对码" Click="OnPairingInfoClick" />
-                        <Button Content="重新配对" Click="OnRepairClick" />
-                    </StackPanel>
+                    <Button Content="配对码" Click="OnPairingInfoClick" HorizontalAlignment="Left" />
                 </StackPanel>
             </Grid>
         </Border>
@@ -196,47 +193,33 @@
             </Grid>
         </Grid>
 
-        <!-- 配对遮罩 -->
+        <!-- 未连接遮罩：本机插件没起来时才会出现 -->
         <Grid
-            x:Name="PairOverlay"
+            x:Name="OfflineOverlay"
             Grid.ColumnSpan="2"
             Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             Visibility="Collapsed">
             <StackPanel
-                Width="380"
+                Width="420"
                 VerticalAlignment="Center"
                 HorizontalAlignment="Center"
                 Spacing="10">
-                <TextBlock Text="连接到 DSH 插件" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock Text="未连接到 DSH 插件" Style="{StaticResource TitleTextBlockStyle}" />
                 <TextBlock
-                    Text="在 DSH 的插件服务运行后，用配对码绑定这台电脑。"
+                    Text="桌面端和插件跑在同一台电脑上，正常情况下无需配对。看到这条说明插件服务没起来，或端口不是 7317。"
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextWrapping="Wrap" />
-                <TextBox x:Name="ServerBox" Header="服务地址" Text="http://127.0.0.1:7317" />
-                <TextBox x:Name="CodeBox" Header="配对码" MaxLength="6" PlaceholderText="6 位数字" />
-                <TextBox x:Name="DeviceBox" Header="设备名称" />
-                <Button
-                    x:Name="PairButton"
-                    Content="配对"
-                    Style="{StaticResource AccentButtonStyle}"
-                    Click="OnPairClick"
-                    HorizontalAlignment="Stretch" />
-                <Button
-                    x:Name="FetchCodeButton"
-                    Content="获取这台电脑上的配对码"
-                    Click="OnFetchCodeClick"
-                    HorizontalAlignment="Stretch" />
                 <TextBlock
-                    x:Name="PairCodeText"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    IsTextSelectionEnabled="True"
-                    TextWrapping="Wrap" />
-                <TextBlock
-                    x:Name="PairError"
+                    x:Name="OfflineError"
                     Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                     TextWrapping="Wrap" />
+                <Button
+                    x:Name="RetryButton"
+                    Content="重试连接"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Click="OnRetryClick"
+                    HorizontalAlignment="Stretch" />
             </StackPanel>
         </Grid>
     </Grid>

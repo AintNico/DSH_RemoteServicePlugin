@@ -36,11 +36,11 @@ dotnet build app/desktop/DshRemote.csproj -c Debug -p:Platform=x64
 
 安装到当前 profile：用 DSH 的 `plugin_manager` → `install_bundle`，目标指向本目录。
 
-## 使用（P0）
+## 使用
 
 1. 插件启动后监听 `http://0.0.0.0:7317`。
-2. 电脑上打开 `http://127.0.0.1:7317/desktop` 查看配对码。
-3. 手机浏览器打开 `http://<电脑局域网 IP>:7317`，输入配对码完成绑定。
-4. 绑定后即可看到会话列表。
+2. **桌面端不需要配对**：它和插件在同一台电脑上，直接连本机端口。
+3. 手机端在配对页输入配对码完成绑定；配对码在桌面端窗口左下角「配对码」里查看，可在同一弹窗里吊销设备。
+4. 绑定后手机可查看会话、收发消息、处理审批、收发文件。
 
 配对码 5 分钟有效，令牌保存在 `.dsh/profiles/<profile>/remote-service/state.json`（仅存哈希）。

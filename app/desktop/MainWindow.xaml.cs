@@ -33,20 +33,11 @@ public sealed partial class MainWindow : Window
 
         AppWindow.Resize(new SizeInt32(1120, 760));
         SessionList.ItemsSource = _sessions;
-        ServerBox.Text = _settings.ServerUrl;
-        DeviceBox.Text = Environment.MachineName;
         ServerLabel.Text = _settings.ServerUrl;
         _countdownTimer.Tick += (_, _) => TickCountdowns();
         _countdownTimer.Start();
 
-        if (string.IsNullOrEmpty(_settings.Token))
-        {
-            ShowPairOverlay(true);
-        }
-        else
-        {
-            _ = ConnectAsync();
-        }
+        _ = ConnectAsync();
 
         Closed += (_, _) =>
         {
@@ -56,16 +47,12 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    // ---------- 配对 ----------
+    // ---------- 连接 ----------
 
-    private void ShowPairOverlay(bool show)
+    private void ShowOffline(bool show, string? message = null)
     {
-        PairOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        PairError.Text = string.Empty;
-        if (show)
-        {
-            CodeBox.Focus(FocusState.Programmatic);
-        }
+        OfflineOverlay.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        OfflineError.Text = message ?? string.Empty;
     }
 
     private void SetBusy(bool busy)
@@ -73,31 +60,29 @@ public sealed partial class MainWindow : Window
         _busy = busy;
         Busy.IsActive = busy;
         RefreshButton.IsEnabled = !busy;
-        PairButton.IsEnabled = !busy;
+        RetryButton.IsEnabled = !busy;
     }
 
+    /// <summary>
+    /// The desktop client talks to the plugin on this machine; loopback peers need no pairing.
+    /// Only the phone pairs, and its code is shown from the sidebar dialog.
+    /// </summary>
     private async Task ConnectAsync()
     {
         SetBusy(true);
+        ShowOffline(false);
         try
         {
             _api?.Dispose();
-            _api = new RemoteApi(_settings.ServerUrl, _settings.Token);
+            _api = new RemoteApi(_settings.ServerUrl, null);
             await LoadSessionsAsync();
             ServerLabel.Text = _settings.ServerUrl;
             StartEventStream();
         }
-        catch (ApiException ex) when (ex.Status == HttpStatusCode.Unauthorized)
-        {
-            _settings.Token = null;
-            SettingsStore.Save(_settings);
-            ShowPairOverlay(true);
-        }
         catch (Exception ex)
         {
             ServerLabel.Text = $"{_settings.ServerUrl} · 未连接";
-            PairError.Text = $"无法连接插件服务：{ex.Message}";
-            ShowPairOverlay(true);
+            ShowOffline(true, $"无法连接插件服务：{ex.Message}");
         }
         finally
         {
@@ -105,70 +90,9 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void OnPairClick(object sender, RoutedEventArgs e)
+    private void OnRetryClick(object sender, RoutedEventArgs e)
     {
-        if (_busy)
-        {
-            return;
-        }
-
-        var server = ServerBox.Text.Trim();
-        var code = CodeBox.Text.Trim();
-        var device = string.IsNullOrWhiteSpace(DeviceBox.Text) ? "Windows" : DeviceBox.Text.Trim();
-
-        if (!Uri.TryCreate(server, UriKind.Absolute, out var uri) || (uri.Scheme != "http" && uri.Scheme != "https"))
-        {
-            PairError.Text = "服务地址需要以 http:// 或 https:// 开头";
-            return;
-        }
-        if (code.Length != 6)
-        {
-            PairError.Text = "配对码是 6 位数字";
-            return;
-        }
-
-        SetBusy(true);
-        PairError.Text = string.Empty;
-        try
-        {
-            using var api = new RemoteApi(server, null);
-            var token = await api.PairAsync(code, device);
-
-            _settings = new AppSettings { ServerUrl = server, Token = token };
-            SettingsStore.Save(_settings);
-            ServerLabel.Text = server;
-            ShowPairOverlay(false);
-
-            _api?.Dispose();
-            _api = new RemoteApi(_settings.ServerUrl, _settings.Token);
-            await LoadSessionsAsync();
-            StartEventStream();
-        }
-        catch (Exception ex)
-        {
-            PairError.Text = ex.Message;
-        }
-        finally
-        {
-            SetBusy(false);
-        }
-    }
-
-    private void OnRepairClick(object sender, RoutedEventArgs e)
-    {
-        _eventsCts?.Cancel();
-        _settings.Token = null;
-        SettingsStore.Save(_settings);
-        _api?.Dispose();
-        _api = null;
-        _currentSessionId = null;
-        _sessions.Clear();
-        _approvals.Clear();
-        MessagePanel.Children.Clear();
-        RenderApprovals();
-        DetailPanel.Visibility = Visibility.Collapsed;
-        EmptyState.Visibility = Visibility.Visible;
-        ShowPairOverlay(true);
+        _ = ConnectAsync();
     }
 
     // ---------- 会话 ----------
@@ -752,22 +676,6 @@ public sealed partial class MainWindow : Window
         }
         var left = TimeSpan.FromMilliseconds(Math.Max(0, info.ExpiresAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
         return $"配对码：{info.Code}　剩余 {(int)left.TotalMinutes}:{left.Seconds:D2}";
-    }
-
-    private async void OnFetchCodeClick(object sender, RoutedEventArgs e)
-    {
-        PairCodeText.Text = "正在读取…";
-        try
-        {
-            using var local = new RemoteApi(LocalBase(ServerBox.Text.Trim()), null);
-            var response = await local.GetPairingAsync();
-            var pairing = response.Pairing ?? await local.RegeneratePairingAsync();
-            PairCodeText.Text = DescribePairing(pairing);
-        }
-        catch (Exception ex)
-        {
-            PairCodeText.Text = $"读取失败：{ex.Message}（配对码只能在这台电脑上读取）";
-        }
     }
 
     private async void OnPairingInfoClick(object sender, RoutedEventArgs e)
