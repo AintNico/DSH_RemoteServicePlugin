@@ -10,7 +10,8 @@ Control your DSH remotely using your smartphone.
 - [x] P2 — 审批推送与回传（策略开关、重试、超时回退、撤销）
 - [x] P3 — 文件双向（附件上传、工作区浏览、签名下载）
 - [ ] P3.5 — AI 主动推送文件（`send_file_to_phone` 工具 + 变更集准入）
-- [ ] P4 — 安卓原生应用
+- [x] P4 — 安卓原生应用初版（配对、会话、消息、审批）
+- [ ] P4.5 — 安卓通知、前台服务、悬浮球、文件收发
 - [ ] P5 — 外网访问
 
 设计方案见 [docs/DESIGN.md](docs/DESIGN.md)。
