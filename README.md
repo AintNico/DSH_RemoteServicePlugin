@@ -5,19 +5,31 @@ Control your DSH remotely using your smartphone.
 ## Status
 
 - [x] P0 — 插件骨架、独立监听、配对鉴权、会话列表
+- [x] P0.5 — 桌面端 WinUI 3 独立窗口（配对 + 会话列表）
 - [ ] P1 — 消息收发
 - [ ] P2 — 审批与提问推送
 - [ ] P3 — 文件双向传输
-- [ ] P4 — 安卓壳（通知、前台服务、悬浮球）
+- [ ] P4 — 安卓原生应用
 - [ ] P5 — 外网访问
 
 设计方案见 [docs/DESIGN.md](docs/DESIGN.md)。
 
+## 组成
+
+| 目录 | 内容 |
+|---|---|
+| 根目录 | DSH 插件（Node，HTTP/WebSocket 后端） |
+| `app/desktop` | 桌面客户端（WinUI 3 / .NET 8 原生窗口） |
+| `web/` | 调试用的网页版界面，正式客户端不使用 |
+
 ## 开发
 
 ```bash
-# 语法与模块加载检查
+# 插件语法与模块加载检查
 node --input-type=module -e "await import('./index.js')"
+
+# 桌面客户端
+dotnet build app/desktop/DshRemote.csproj -c Debug -p:Platform=x64
 ```
 
 安装到当前 profile：用 DSH 的 `plugin_manager` → `install_bundle`，目标指向本目录。

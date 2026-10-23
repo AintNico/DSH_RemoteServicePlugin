@@ -1,0 +1,151 @@
+<Window
+    x:Class="DshRemote.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:DshRemote.Models"
+    Title="DSH 远程">
+
+    <Grid x:Name="Root">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="320" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 会话侧边栏 -->
+        <Border
+            Grid.Column="0"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,0,1,0">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Padding="16,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="会话" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                <ProgressRing x:Name="Busy" Grid.Column="1" IsActive="False" Width="16" Height="16" Margin="8,0" />
+                <Button x:Name="RefreshButton" Grid.Column="2" Content="刷新" Click="OnRefreshClick" />
+            </Grid>
+
+            <ListView
+                x:Name="SessionList"
+                Grid.Row="1"
+                SelectionMode="Single"
+                SelectionChanged="OnSessionSelectionChanged">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:SessionItem">
+                        <Grid Padding="0,8" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock
+                                Text="{x:Bind Dot}"
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBlock
+                                    Text="{x:Bind Title}"
+                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                    TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Text="{x:Bind Subtitle}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <StackPanel Grid.Row="2" Padding="16,12" Spacing="6">
+                <TextBlock
+                    x:Name="ServerLabel"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button Content="重新配对" Click="OnRepairClick" HorizontalAlignment="Left" />
+            </StackPanel>
+        </Grid>
+        </Border>
+
+        <!-- 会话详情 -->
+        <Grid Grid.Column="1" Padding="28">
+            <StackPanel
+                x:Name="EmptyState"
+                VerticalAlignment="Center"
+                HorizontalAlignment="Center"
+                Spacing="6">
+                <TextBlock Text="选择一个会话" Style="{StaticResource SubtitleTextBlockStyle}" HorizontalAlignment="Center" />
+                <TextBlock
+                    Text="消息收发将在 P1 接入"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    HorizontalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel x:Name="DetailPanel" Visibility="Collapsed" Spacing="10">
+                <TextBlock x:Name="DetailTitle" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock
+                    x:Name="DetailPath"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <TextBlock x:Name="DetailStatus" Style="{StaticResource BodyTextBlockStyle}" />
+                <Border
+                    Padding="16"
+                    CornerRadius="8"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1">
+                    <TextBlock
+                        Text="该会话的消息流会在 P1 出现在这里。"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <!-- 配对遮罩 -->
+        <Grid
+            x:Name="PairOverlay"
+            Grid.ColumnSpan="2"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Visibility="Collapsed">
+            <StackPanel
+                Width="380"
+                VerticalAlignment="Center"
+                HorizontalAlignment="Center"
+                Spacing="10">
+                <TextBlock Text="连接到 DSH 插件" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock
+                    Text="在 DSH 的插件服务运行后，用配对码绑定这台电脑。"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <TextBox x:Name="ServerBox" Header="服务地址" Text="http://127.0.0.1:7317" />
+                <TextBox x:Name="CodeBox" Header="配对码" MaxLength="6" PlaceholderText="6 位数字" />
+                <TextBox x:Name="DeviceBox" Header="设备名称" />
+                <Button
+                    x:Name="PairButton"
+                    Content="配对"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Click="OnPairClick"
+                    HorizontalAlignment="Stretch" />
+                <TextBlock
+                    x:Name="PairError"
+                    Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
