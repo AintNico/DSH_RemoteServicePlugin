@@ -13,6 +13,55 @@
                     <TextBlock Text="{x:Bind Detail}" FontSize="12" Opacity="0.6" />
                 </StackPanel>
             </DataTemplate>
+
+            <DataTemplate x:Key="UserMessageTemplate" x:DataType="models:MessageItem">
+                <Grid Padding="0,4">
+                    <Border
+                        HorizontalAlignment="Right"
+                        MaxWidth="640"
+                        Padding="12,8"
+                        CornerRadius="10"
+                        Background="{ThemeResource AccentFillColorDefaultBrush}">
+                        <TextBlock
+                            Text="{x:Bind Text}"
+                            TextWrapping="Wrap"
+                            IsTextSelectionEnabled="True"
+                            Foreground="White" />
+                    </Border>
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="AssistantMessageTemplate" x:DataType="models:MessageItem">
+                <Grid Padding="0,4">
+                    <Border
+                        HorizontalAlignment="Left"
+                        MaxWidth="640"
+                        Padding="12,8"
+                        CornerRadius="10"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                        <TextBlock Text="{x:Bind Text}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                    </Border>
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="ToolMessageTemplate" x:DataType="models:MessageItem">
+                <Grid Padding="0,2">
+                    <TextBlock
+                        Text="{x:Bind Text}"
+                        TextWrapping="Wrap"
+                        IsTextSelectionEnabled="True"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </DataTemplate>
+
+            <models:MessageTemplateSelector
+                x:Key="MessageTemplateSelector"
+                User="{StaticResource UserMessageTemplate}"
+                Assistant="{StaticResource AssistantMessageTemplate}"
+                Tool="{StaticResource ToolMessageTemplate}" />
         </Grid.Resources>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="320" />
@@ -168,13 +217,23 @@
                     </StackPanel>
                 </Grid>
 
-                <ScrollViewer
-                    x:Name="MessageScroll"
+                <ListView
+                    x:Name="MessageList"
                     Grid.Row="1"
-                    VerticalScrollBarVisibility="Auto"
-                    VerticalScrollMode="Auto">
-                    <StackPanel x:Name="MessagePanel" Spacing="10" Padding="0,4,10,4" />
-                </ScrollViewer>
+                    SelectionMode="None"
+                    IsItemClickEnabled="False"
+                    ItemTemplateSelector="{StaticResource MessageTemplateSelector}"
+                    Padding="0,4,10,4"
+                    ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Margin" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
 
                 <StackPanel
                     x:Name="ApprovalPanel"

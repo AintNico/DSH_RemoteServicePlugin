@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Net;
+using System.Runtime.InteropServices;
 using DshRemote.Models;
 using DshRemote.Services;
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -10,15 +12,21 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
 using Windows.System;
+using Drawing = System.Drawing;
+using WinForms = System.Windows.Forms;
 
 namespace DshRemote;
 
 public sealed partial class MainWindow : Window
 {
+    /// <summary>Upper bound on rendered messages; the list is virtualized, this bounds the data.</summary>
+    private const int MaxRenderedMessages = 300;
+
     private AppSettings _settings = SettingsStore.Load();
     private RemoteApi? _api;
     private readonly ObservableCollection<WorkspaceGroup> _groups = new();
     private readonly CollectionViewSource _groupsView = new() { IsSourceGrouped = true };
+    private readonly ObservableCollection<MessageItem> _messages = new();
     private readonly Dictionary<string, ApprovalDto> _approvals = new();
     private readonly Dictionary<string, TextBlock> _countdownLabels = new();
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -39,6 +47,7 @@ public sealed partial class MainWindow : Window
         SessionList.ItemsSource = null;
         _groupsView.Source = _groups;
         SessionList.ItemsSource = _groupsView.View;
+        MessageList.ItemsSource = _messages;
         ServerLabel.Text = _settings.ServerUrl;
         _countdownTimer.Tick += (_, _) => TickCountdowns();
         _countdownTimer.Start();
@@ -51,7 +60,11 @@ public sealed partial class MainWindow : Window
             _eventsCts?.Cancel();
             _api?.Dispose();
             _tunnel.Dispose();
+            _tray?.Dispose();
+            _tray = null;
         };
+
+        AppWindow.Closing += OnWindowClosing;
     }
 
     /// <summary>
@@ -65,6 +78,105 @@ public sealed partial class MainWindow : Window
         {
             AppWindow.Resize(new SizeInt32(1120, 760));
         }
+    }
+
+    // ---------- 托盘 ----------
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    private WinForms.NotifyIcon? _tray;
+    private bool _exitRequested;
+    private bool _trayHintShown;
+
+    /// <summary>
+    /// Closing the window hides it instead of ending the app, so the tray icon keeps the
+    /// session available. Only the tray menu's 退出 really closes.
+    /// </summary>
+    private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_exitRequested)
+        {
+            return;
+        }
+        args.Cancel = true;
+        HideToTray();
+    }
+
+    private void HideToTray()
+    {
+        EnsureTray();
+        AppWindow.Hide();
+        if (!_trayHintShown)
+        {
+            _trayHintShown = true;
+            _tray?.ShowBalloonTip(2500, "DSH 远程", "已隐藏到托盘，双击图标可恢复。", WinForms.ToolTipIcon.Info);
+        }
+    }
+
+    private void EnsureTray()
+    {
+        if (_tray is not null)
+        {
+            return;
+        }
+
+        var menu = new WinForms.ContextMenuStrip();
+        menu.Items.Add("显示主窗口", null, (_, _) => RestoreFromTray());
+        menu.Items.Add(new WinForms.ToolStripSeparator());
+        menu.Items.Add("退出", null, (_, _) => ExitFromTray());
+
+        _tray = new WinForms.NotifyIcon
+        {
+            Icon = TrayIcon(),
+            Text = "DSH 远程",
+            Visible = true,
+            ContextMenuStrip = menu,
+        };
+        _tray.DoubleClick += (_, _) => RestoreFromTray();
+    }
+
+    private void RestoreFromTray()
+    {
+        AppWindow.Show();
+        Activate();
+        try
+        {
+            SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        }
+        catch
+        {
+            // Focus is best-effort; the window is already visible.
+        }
+    }
+
+    private void ExitFromTray()
+    {
+        _exitRequested = true;
+        _tray?.Dispose();
+        _tray = null;
+        Close();
+    }
+
+    private static Drawing.Icon TrayIcon()
+    {
+        try
+        {
+            var path = Environment.ProcessPath;
+            if (!string.IsNullOrEmpty(path))
+            {
+                var icon = Drawing.Icon.ExtractAssociatedIcon(path);
+                if (icon is not null)
+                {
+                    return icon;
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to the stock icon.
+        }
+        return Drawing.SystemIcons.Application;
     }
 
     // ---------- 连接 ----------
@@ -251,7 +363,7 @@ public sealed partial class MainWindow : Window
     private async Task LoadMessagesAsync(string sessionId)
     {
         var generation = ++_loadGeneration;
-        MessagePanel.Children.Clear();
+        _messages.Clear();
 
         try
         {
@@ -261,12 +373,19 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            foreach (var message in history.Messages)
+            // Virtualized list: only the visible bubbles exist as UI elements, and the history
+            // is capped so a session with thousands of messages stays cheap to open.
+            var all = history.Messages;
+            var truncated = all.Count > MaxRenderedMessages;
+            var slice = truncated ? all.Skip(all.Count - MaxRenderedMessages) : all;
+
+            foreach (var message in slice)
             {
-                AddBubble(message);
+                _messages.Add(new MessageItem { Role = message.Role, Text = message.Text });
             }
 
-            DetailStatus.Text = $"{(SessionList.SelectedItem as SessionItem)?.Status ?? ""} · {history.Messages.Count} 条消息";
+            var suffix = truncated ? $"（仅显示最近 {MaxRenderedMessages} 条）" : string.Empty;
+            DetailStatus.Text = $"{(SessionList.SelectedItem as SessionItem)?.Status ?? ""} · {all.Count} 条消息{suffix}";
             ScrollToBottom();
         }
         catch (Exception ex)
@@ -479,43 +598,13 @@ public sealed partial class MainWindow : Window
 
     private void AddBubble(MessageDto message)
     {
-        var isUser = message.Role == "user";
-        var isTool = message.Role == "tool";
+        _messages.Add(new MessageItem { Role = message.Role, Text = message.Text });
 
-        var text = new TextBlock
+        // Drop the oldest entries so a long running session cannot grow without bound.
+        while (_messages.Count > MaxRenderedMessages)
         {
-            Text = message.Text,
-            TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true,
-        };
-
-        var bubble = new Border
-        {
-            Padding = new Thickness(12, 8, 12, 8),
-            CornerRadius = new CornerRadius(10),
-            MaxWidth = 640,
-            HorizontalAlignment = isUser ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-            Child = text,
-        };
-
-        if (isUser)
-        {
-            bubble.Background = ThemeBrush("AccentFillColorDefaultBrush", Colors.SteelBlue);
-            text.Foreground = new SolidColorBrush(Colors.White);
+            _messages.RemoveAt(0);
         }
-        else if (isTool)
-        {
-            text.FontSize = 12;
-            text.Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray);
-        }
-        else
-        {
-            bubble.Background = ThemeBrush("CardBackgroundFillColorDefaultBrush", Colors.WhiteSmoke);
-            bubble.BorderBrush = ThemeBrush("CardStrokeColorDefaultBrush", Colors.LightGray);
-            bubble.BorderThickness = new Thickness(1);
-        }
-
-        MessagePanel.Children.Add(bubble);
     }
 
     private static Brush ThemeBrush(string key, Windows.UI.Color fallback)
@@ -531,8 +620,10 @@ public sealed partial class MainWindow : Window
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            MessageScroll.UpdateLayout();
-            MessageScroll.ChangeView(null, MessageScroll.ScrollableHeight, null, true);
+            if (MessageList.Items.Count > 0)
+            {
+                MessageList.ScrollIntoView(MessageList.Items[^1]);
+            }
         });
     }
 
