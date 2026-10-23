@@ -734,6 +734,177 @@ public sealed partial class MainWindow : Window
         await dialog.ShowAsync();
     }
 
+    // ---------- 配对码 ----------
+
+    /// <summary>The pairing endpoints are loopback-only, and this app always runs on the plugin's machine.</summary>
+    private static string LocalBase(string server)
+    {
+        return Uri.TryCreate(server, UriKind.Absolute, out var uri)
+            ? $"http://127.0.0.1:{uri.Port}"
+            : "http://127.0.0.1:7317";
+    }
+
+    private static string DescribePairing(PairingInfoDto? info)
+    {
+        if (info is null || string.IsNullOrEmpty(info.Code))
+        {
+            return "当前没有有效配对码";
+        }
+        var left = TimeSpan.FromMilliseconds(Math.Max(0, info.ExpiresAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+        return $"配对码：{info.Code}　剩余 {(int)left.TotalMinutes}:{left.Seconds:D2}";
+    }
+
+    private async void OnFetchCodeClick(object sender, RoutedEventArgs e)
+    {
+        PairCodeText.Text = "正在读取…";
+        try
+        {
+            using var local = new RemoteApi(LocalBase(ServerBox.Text.Trim()), null);
+            var response = await local.GetPairingAsync();
+            var pairing = response.Pairing ?? await local.RegeneratePairingAsync();
+            PairCodeText.Text = DescribePairing(pairing);
+        }
+        catch (Exception ex)
+        {
+            PairCodeText.Text = $"读取失败：{ex.Message}（配对码只能在这台电脑上读取）";
+        }
+    }
+
+    private async void OnPairingInfoClick(object sender, RoutedEventArgs e)
+    {
+        var local = new RemoteApi(LocalBase(_settings.ServerUrl), null);
+
+        var codeBlock = new TextBlock
+        {
+            FontSize = 34,
+            FontFamily = new FontFamily("Consolas"),
+            IsTextSelectionEnabled = true,
+            Text = "------",
+        };
+        var countdown = new TextBlock
+        {
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+        };
+        var deviceList = new StackPanel { Spacing = 6 };
+        var status = new TextBlock
+        {
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        var regenerate = new Button { Content = "重新生成" };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        actions.Children.Add(regenerate);
+
+        var stack = new StackPanel { Spacing = 10, Width = 440 };
+        stack.Children.Add(codeBlock);
+        stack.Children.Add(countdown);
+        stack.Children.Add(actions);
+        stack.Children.Add(new TextBlock { Text = "已配对设备", Margin = new Thickness(0, 8, 0, 0) });
+        stack.Children.Add(deviceList);
+        stack.Children.Add(status);
+
+        var dialog = new ContentDialog
+        {
+            Title = "配对码与设备",
+            Content = stack,
+            CloseButtonText = "关闭",
+            XamlRoot = Root.XamlRoot,
+        };
+
+        PairingInfoDto? current = null;
+
+        async Task ReloadAsync()
+        {
+            try
+            {
+                var response = await local.GetPairingAsync();
+                current = response.Pairing;
+                if (current is null)
+                {
+                    current = await local.RegeneratePairingAsync();
+                }
+                codeBlock.Text = current?.Code ?? "------";
+
+                deviceList.Children.Clear();
+                if (response.Devices.Count == 0)
+                {
+                    deviceList.Children.Add(new TextBlock { Text = "还没有设备配对", Opacity = 0.6 });
+                }
+                foreach (var device in response.Devices)
+                {
+                    var row = new Grid();
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+                    var info = new StackPanel { Spacing = 2 };
+                    info.Children.Add(new TextBlock { Text = device.Name });
+                    info.Children.Add(new TextBlock
+                    {
+                        Text = "配对于 " + DateTimeOffset.FromUnixTimeMilliseconds(device.CreatedAt).ToLocalTime().ToString("MM-dd HH:mm"),
+                        FontSize = 12,
+                        Opacity = 0.6,
+                    });
+                    row.Children.Add(info);
+
+                    var revoke = new Button { Content = "吊销" };
+                    Grid.SetColumn(revoke, 1);
+                    revoke.Click += async (_, _) =>
+                    {
+                        await local.RevokeDeviceAsync(device.Id);
+                        status.Text = $"已吊销 {device.Name}";
+                        await ReloadAsync();
+                    };
+                    row.Children.Add(revoke);
+                    deviceList.Children.Add(row);
+                }
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"读取失败：{ex.Message}";
+            }
+        }
+
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        timer.Tick += (_, _) =>
+        {
+            if (current is null)
+            {
+                countdown.Text = string.Empty;
+                return;
+            }
+            var left = TimeSpan.FromMilliseconds(Math.Max(0, current.ExpiresAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
+            countdown.Text = left.TotalSeconds <= 0
+                ? "已过期，点击“重新生成”"
+                : $"剩余 {(int)left.TotalMinutes}:{left.Seconds:D2}";
+        };
+        dialog.Closed += (_, _) =>
+        {
+            timer.Stop();
+            local.Dispose();
+        };
+
+        regenerate.Click += async (_, _) =>
+        {
+            try
+            {
+                current = await local.RegeneratePairingAsync();
+                codeBlock.Text = current?.Code ?? "------";
+                status.Text = "已生成新的配对码";
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"生成失败：{ex.Message}";
+            }
+        };
+
+        await ReloadAsync();
+        timer.Start();
+        await dialog.ShowAsync();
+    }
+
     // ---------- 工具方法 ----------
 
     private static string TitleOf(SessionDto session)

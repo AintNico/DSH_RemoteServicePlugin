@@ -80,7 +80,10 @@
                         x:Name="ServerLabel"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <Button Content="重新配对" Click="OnRepairClick" HorizontalAlignment="Left" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="配对码" Click="OnPairingInfoClick" />
+                        <Button Content="重新配对" Click="OnRepairClick" />
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>
@@ -219,6 +222,17 @@
                     Style="{StaticResource AccentButtonStyle}"
                     Click="OnPairClick"
                     HorizontalAlignment="Stretch" />
+                <Button
+                    x:Name="FetchCodeButton"
+                    Content="获取这台电脑上的配对码"
+                    Click="OnFetchCodeClick"
+                    HorizontalAlignment="Stretch" />
+                <TextBlock
+                    x:Name="PairCodeText"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    IsTextSelectionEnabled="True"
+                    TextWrapping="Wrap" />
                 <TextBlock
                     x:Name="PairError"
                     Foreground="{ThemeResource SystemFillColorCriticalBrush}"

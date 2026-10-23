@@ -13,7 +13,7 @@ public final class Prefs {
     }
 
     public String server() {
-        return prefs.getString("server", "http://192.168.1.2:7317");
+        return prefs.getString("server", "http://192.168.33.191:7317");
     }
 
     public String token() {

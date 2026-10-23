@@ -278,5 +278,24 @@ public sealed class RemoteApi : IDisposable
         return await ReadAsync<JsonElement>(response, cancellationToken);
     }
 
+    public async Task<PairingResponseDto> GetPairingAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync("api/pairing", cancellationToken);
+        return await ReadAsync<PairingResponseDto>(response, cancellationToken);
+    }
+
+    public async Task<PairingInfoDto?> RegeneratePairingAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsync("api/pairing/regenerate", null, cancellationToken);
+        var value = await ReadAsync<PairingOnlyDto>(response, cancellationToken);
+        return value.Pairing;
+    }
+
+    public async Task<bool> RevokeDeviceAsync(string id, CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.PostAsJsonAsync("api/devices/revoke", new { id }, cancellationToken);
+        return response.IsSuccessStatusCode;
+    }
+
     public void Dispose() => _http.Dispose();
 }
