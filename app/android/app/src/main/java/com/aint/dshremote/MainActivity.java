@@ -1115,20 +1115,33 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            FrameLayout holder;
+            LinearLayout row;
             TextView bubble;
+            View leftSpacer;
+            View rightSpacer;
             if (convertView == null) {
-                holder = new FrameLayout(MainActivity.this);
+                row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+
+                leftSpacer = new View(MainActivity.this);
+                rightSpacer = new View(MainActivity.this);
                 bubble = new TextView(MainActivity.this);
                 bubble.setTextIsSelectable(true);
                 bubble.setLineSpacing(dp(2), 1f);
-                holder.addView(bubble, new FrameLayout.LayoutParams(
+
+                row.addView(leftSpacer, new LinearLayout.LayoutParams(0, 1, 0));
+                row.addView(bubble, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                holder.setTag(bubble);
-                convertView = holder;
+                row.addView(rightSpacer, new LinearLayout.LayoutParams(0, 1, 0));
+
+                row.setTag(new Object[] { bubble, leftSpacer, rightSpacer });
+                convertView = row;
             } else {
-                holder = (FrameLayout) convertView;
-                bubble = (TextView) holder.getTag();
+                row = (LinearLayout) convertView;
+                Object[] tag = (Object[]) row.getTag();
+                bubble = (TextView) tag[0];
+                leftSpacer = (View) tag[1];
+                rightSpacer = (View) tag[2];
             }
 
             JSONObject message = messages.get(position);
@@ -1139,17 +1152,28 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             } else {
                 bubble.setText(Markdown.render(raw));
             }
-            bubble.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.78f));
 
-            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) bubble.getLayoutParams();
-            params.gravity = "user".equals(role) ? Gravity.END : Gravity.START;
-            params.leftMargin = dp(12);
-            params.rightMargin = dp(12);
-            params.topMargin = dp(3);
-            params.bottomMargin = dp(3);
-            bubble.setLayoutParams(params);
+            boolean isUser = "user".equals(role);
+            bubble.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.76f));
 
-            if ("user".equals(role)) {
+            LinearLayout.LayoutParams bubbleParams = (LinearLayout.LayoutParams) bubble.getLayoutParams();
+            bubbleParams.leftMargin = dp(12);
+            bubbleParams.rightMargin = dp(12);
+            bubbleParams.topMargin = dp(3);
+            bubbleParams.bottomMargin = dp(3);
+            bubble.setLayoutParams(bubbleParams);
+
+            // A weighted spacer on the opposite side positions the bubble without relying on
+            // gravity, which stays stable across recycled rows.
+            LinearLayout.LayoutParams leftParams = (LinearLayout.LayoutParams) leftSpacer.getLayoutParams();
+            leftParams.weight = isUser ? 1f : 0f;
+            leftSpacer.setLayoutParams(leftParams);
+
+            LinearLayout.LayoutParams rightParams = (LinearLayout.LayoutParams) rightSpacer.getLayoutParams();
+            rightParams.weight = isUser ? 0f : 1f;
+            rightSpacer.setLayoutParams(rightParams);
+
+            if (isUser) {
                 bubble.setTextSize(15);
                 bubble.setTextColor(Color.WHITE);
                 bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
