@@ -48,9 +48,30 @@
                     Grid.Row="1"
                     SelectionMode="Single"
                     SelectionChanged="OnSessionSelectionChanged">
+                    <ListView.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <StackPanel Padding="16,14,16,4" Spacing="1">
+                                        <TextBlock
+                                            Text="{Binding Title}"
+                                            FontSize="12"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock
+                                            Text="{Binding Subtitle}"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            TextTrimming="CharacterEllipsis"
+                                            MaxLines="1" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListView.GroupStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate x:DataType="models:SessionItem">
-                            <Grid Padding="0,8" ColumnSpacing="8">
+                            <Grid Padding="12,8,0,8" ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />

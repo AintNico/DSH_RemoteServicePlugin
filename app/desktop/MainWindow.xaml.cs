@@ -5,6 +5,7 @@ using DshRemote.Services;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
@@ -16,7 +17,8 @@ public sealed partial class MainWindow : Window
 {
     private AppSettings _settings = SettingsStore.Load();
     private RemoteApi? _api;
-    private readonly ObservableCollection<SessionItem> _sessions = new();
+    private readonly ObservableCollection<WorkspaceGroup> _groups = new();
+    private readonly CollectionViewSource _groupsView = new() { IsSourceGrouped = true };
     private readonly Dictionary<string, ApprovalDto> _approvals = new();
     private readonly Dictionary<string, TextBlock> _countdownLabels = new();
     private readonly DispatcherTimer _countdownTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -34,7 +36,9 @@ public sealed partial class MainWindow : Window
 
         AppWindow.Resize(new SizeInt32(1120, 760));
         Activated += EnsureWindowSize;
-        SessionList.ItemsSource = _sessions;
+        SessionList.ItemsSource = null;
+        _groupsView.Source = _groups;
+        SessionList.ItemsSource = _groupsView.View;
         ServerLabel.Text = _settings.ServerUrl;
         _countdownTimer.Tick += (_, _) => TickCountdowns();
         _countdownTimer.Start();
@@ -120,24 +124,82 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var sessions = await _api.GetSessionsAsync();
-        _sessions.Clear();
-        foreach (var dto in sessions.OrderByDescending(session => session.UpdatedAt ?? 0))
+        WorkspacesDto? payload = null;
+        try
         {
-            _sessions.Add(new SessionItem
-            {
-                Id = dto.Id,
-                Title = TitleOf(dto),
-                Subtitle = $"{FormatWhen(dto.UpdatedAt)} · {(dto.Running ? "运行中" : "空闲")}",
-                Running = dto.Running,
-            });
+            payload = await _api.GetWorkspacesAsync();
+        }
+        catch
+        {
+            // A plugin without the workspaces route still works: fall back to one flat section.
+            payload = null;
         }
 
-        EmptyState.Visibility = _sessions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (_sessions.Count > 0 && SessionList.SelectedIndex < 0)
+        var groups = new List<WorkspaceGroup>();
+
+        if (payload is not null)
         {
-            SessionList.SelectedIndex = 0;
+            foreach (var workspace in payload.Workspaces)
+            {
+                var group = new WorkspaceGroup
+                {
+                    Title = string.IsNullOrWhiteSpace(workspace.Title) ? workspace.Path : workspace.Title,
+                    Subtitle = $"{workspace.Sessions.Count} 个会话 · {workspace.Path}",
+                };
+                foreach (var dto in workspace.Sessions)
+                {
+                    group.Add(ToItem(dto));
+                }
+                groups.Add(group);
+            }
+
+            if (payload.Ungrouped.Count > 0)
+            {
+                var loose = new WorkspaceGroup
+                {
+                    Title = "未分组",
+                    Subtitle = $"{payload.Ungrouped.Count} 个会话",
+                };
+                foreach (var dto in payload.Ungrouped)
+                {
+                    loose.Add(ToItem(dto));
+                }
+                groups.Add(loose);
+            }
         }
+        else
+        {
+            var flat = new WorkspaceGroup { Title = "会话", Subtitle = "" };
+            foreach (var dto in await _api.GetSessionsAsync())
+            {
+                flat.Add(ToItem(dto));
+            }
+            groups.Add(flat);
+        }
+
+        _groups.Clear();
+        foreach (var group in groups)
+        {
+            _groups.Add(group);
+        }
+
+        var total = groups.Sum(group => group.Count);
+        EmptyState.Visibility = total == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (total > 0 && SessionList.SelectedItem is null)
+        {
+            SessionList.SelectedItem = groups.SelectMany(group => group).First();
+        }
+    }
+
+    private static SessionItem ToItem(SessionDto dto)
+    {
+        return new SessionItem
+        {
+            Id = dto.Id,
+            Title = TitleOf(dto),
+            Subtitle = $"{FormatWhen(dto.UpdatedAt)} · {(dto.Running ? "运行中" : "空闲")}",
+            Running = dto.Running,
+        };
     }
 
     private async void OnRefreshClick(object sender, RoutedEventArgs e)

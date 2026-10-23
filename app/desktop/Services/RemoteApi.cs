@@ -66,6 +66,12 @@ public sealed class RemoteApi : IDisposable
         return result.Sessions;
     }
 
+    public async Task<WorkspacesDto> GetWorkspacesAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await _http.GetAsync("api/workspaces", cancellationToken);
+        return await ReadAsync<WorkspacesDto>(response, cancellationToken);
+    }
+
     public async Task<MessagesDto> GetMessagesAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         using var response = await _http.GetAsync(
