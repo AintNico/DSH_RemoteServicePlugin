@@ -96,9 +96,6 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private StringBuilder streamBuffer;
     private JSONObject streamingMessage;
 
-    private Drawable bubbleUser;
-    private Drawable bubbleAssistant;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -1193,24 +1190,23 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
     }
 
+    /**
+     * Each bubble gets its own drawable: sharing one instance across recycled views makes the
+     * drawable callback bounce between them, which shows up as bubbles that lose their
+     * background.
+     */
     private Drawable bubbleUser() {
-        if (bubbleUser == null) {
-            GradientDrawable shape = new GradientDrawable();
-            shape.setColor(ACCENT);
-            shape.setCornerRadius(dp(14));
-            bubbleUser = shape;
-        }
-        return bubbleUser;
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(ACCENT);
+        shape.setCornerRadius(dp(14));
+        return shape;
     }
 
     private Drawable bubbleAssistant() {
-        if (bubbleAssistant == null) {
-            GradientDrawable shape = new GradientDrawable();
-            shape.setColor(PANEL);
-            shape.setCornerRadius(dp(14));
-            bubbleAssistant = shape;
-        }
-        return bubbleAssistant;
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(PANEL);
+        shape.setCornerRadius(dp(14));
+        return shape;
     }
 
     // ---------- 控件 ----------
