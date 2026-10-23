@@ -2,10 +2,13 @@ package com.aint.dshremote;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,6 +16,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -40,10 +44,12 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity implements LiveLink.Listener {
 
     private static final int ACCENT = 0xFF1A73E8;
+    private static final int GREEN = 0xFF188038;
     private static final int TEXT = 0xFF1B1F27;
     private static final int MUTED = 0xFF7A808C;
     private static final int PANEL = 0xFFF2F4F7;
     private static final int DANGER = 0xFFD93025;
+    private static final int LINE = 0xFFE8EAED;
 
     private static final int REQ_PICK_FILE = 1001;
     private static final int REQ_NOTIFICATIONS = 1002;
@@ -58,6 +64,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private Api api;
     private String sessionId;
     private String sessionTitle;
+    private long lastSeq;
     private boolean sessionsVisible;
     private boolean uploading;
     private long lastSessionRefresh;
@@ -70,6 +77,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private TextView chatStatus;
     private Button attachButton;
     private TextView sessionStatus;
+
+    private Drawable bubbleUser;
+    private Drawable bubbleAssistant;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +117,18 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         io.shutdownNow();
     }
 
+    /** Gesture or key back: leave the conversation first, then the app. */
+    @Override
+    public void onBackPressed() {
+        if (sessionId != null) {
+            sessionId = null;
+            approvalViews.clear();
+            showSessions();
+            return;
+        }
+        super.onBackPressed();
+    }
+
     private void requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, REQ_NOTIFICATIONS);
@@ -117,6 +139,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
     private void showPairing() {
         sessionsVisible = false;
+        sessionId = null;
+
         LinearLayout root = column(24);
         root.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -134,9 +158,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         root.addView(code);
         root.addView(space(10));
         root.addView(device);
-        root.addView(space(16));
+        root.addView(space(18));
 
-        Button pair = primaryButton("配对");
+        Button pair = button("配对", ACCENT, Color.WHITE);
         root.addView(pair, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
 
         TextView error = label("", 13, DANGER, false);
@@ -157,6 +181,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             final String targetServer = serverUrl;
             final String targetCode = pairingCode;
             pair.setEnabled(false);
+            pair.setAlpha(0.5f);
             error.setText("");
             io.execute(() -> {
                 try {
@@ -168,6 +193,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 } catch (Exception exception) {
                     main.post(() -> {
                         pair.setEnabled(true);
+                        pair.setAlpha(1f);
                         error.setText(friendly(exception));
                     });
                 }
@@ -205,12 +231,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         LinearLayout header = row();
         header.setPadding(dp(16), dp(14), dp(16), dp(10));
         header.addView(label("会话", 20, TEXT, true), weight(1));
-        Button refresh = smallButton("刷新");
-        header.addView(refresh);
+        header.addView(button("刷新", PANEL, ACCENT), new LinearLayout.LayoutParams(dp(72), dp(40)));
         root.addView(header);
 
         sessionStatus = label("正在加载…", 12, MUTED, false);
-        sessionStatus.setPadding(dp(16), 0, dp(16), dp(6));
+        sessionStatus.setPadding(dp(16), 0, dp(16), dp(8));
         root.addView(sessionStatus);
 
         ListView list = new ListView(this);
@@ -220,21 +245,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         list.setAdapter(sessionAdapter);
         root.addView(list, verticalWeight(1));
 
-        Button unpair = smallButton("解除配对");
         LinearLayout footer = row();
-        footer.setPadding(dp(16), dp(8), dp(16), dp(16));
-        footer.addView(unpair);
+        footer.setPadding(dp(16), dp(10), dp(16), dp(16));
+        Button unpair = button("解除配对", PANEL, ACCENT);
+        footer.addView(unpair, new LinearLayout.LayoutParams(dp(104), dp(40)));
         root.addView(footer);
 
-        refresh.setOnClickListener(v -> loadSessions());
-        list.setOnItemClickListener((parent, view, position, id) -> {
-            if (position < sessions.size()) {
-                JSONObject session = sessions.get(position);
-                sessionId = session.optString("id");
-                sessionTitle = titleOf(session);
-                showChat();
-            }
-        });
         unpair.setOnClickListener(v -> {
             prefs.clear();
             LiveLink.get().stop();
@@ -294,12 +310,16 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
     private void showChat() {
         sessionsVisible = false;
+        lastSeq = 0;
+
         LinearLayout root = column(0);
 
         LinearLayout header = row();
-        header.setPadding(dp(10), dp(10), dp(14), dp(8));
+        header.setPadding(dp(8), dp(10), dp(14), dp(8));
+
         TextView back = label("‹", 30, ACCENT, true);
-        back.setPadding(dp(10), 0, dp(10), dp(4));
+        back.setPadding(dp(12), 0, dp(10), dp(4));
+        back.setOnClickListener(v -> onBackPressed());
         header.addView(back);
 
         LinearLayout titleBox = new LinearLayout(this);
@@ -309,57 +329,55 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         titleBox.addView(chatStatus);
         header.addView(titleBox, weight(1));
 
-        Button stop = smallButton("停止");
-        header.addView(stop);
+        Button stop = button("停止", PANEL, ACCENT);
+        header.addView(stop, new LinearLayout.LayoutParams(dp(72), dp(40)));
         root.addView(header);
+
+        View divider = new View(this);
+        divider.setBackgroundColor(LINE);
+        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
 
         chatList = new ListView(this);
         chatList.setDivider(null);
         chatList.setDividerHeight(0);
         chatList.setClipToPadding(false);
+        chatList.setPadding(0, dp(6), 0, dp(6));
         chatAdapter = new ChatAdapter();
         chatList.setAdapter(chatAdapter);
         root.addView(chatList, verticalWeight(1));
 
         approvalBox = new LinearLayout(this);
         approvalBox.setOrientation(LinearLayout.VERTICAL);
-        approvalBox.setPadding(dp(12), 0, dp(12), 0);
+        approvalBox.setPadding(dp(12), 0, dp(12), dp(6));
         root.addView(approvalBox);
 
         LinearLayout composerRow = row();
         composerRow.setPadding(dp(10), dp(8), dp(10), dp(14));
 
-        attachButton = new Button(this);
-        attachButton.setText("＋");
+        attachButton = button("＋", PANEL, ACCENT);
         attachButton.setTextSize(20);
-        attachButton.setAllCaps(false);
-        attachButton.setTextColor(ACCENT);
-        attachButton.setBackground(roundRect(PANEL, 12));
-        LinearLayout.LayoutParams attachParams = new LinearLayout.LayoutParams(dp(48), dp(46));
-        attachParams.rightMargin = dp(6);
+        LinearLayout.LayoutParams attachParams = new LinearLayout.LayoutParams(dp(46), dp(46));
+        attachParams.rightMargin = dp(8);
         composerRow.addView(attachButton, attachParams);
 
         composer = new EditText(this);
         composer.setHint("输入消息");
-        composer.setBackground(roundRect(PANEL, 12));
+        composer.setBackground(roundRect(PANEL, 14));
         composer.setPadding(dp(14), dp(10), dp(14), dp(10));
         composer.setMaxLines(4);
+        composer.setTextSize(15);
         composerRow.addView(composer, weight(1));
 
-        Button send = primaryButton("发送");
-        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(76), dp(46));
-        sendParams.leftMargin = dp(6);
+        Button send = button("发送", ACCENT, Color.WHITE);
+        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(72), dp(46));
+        sendParams.leftMargin = dp(8);
         composerRow.addView(send, sendParams);
+
         root.addView(composerRow);
 
         messages.clear();
         chatList.setAdapter(chatAdapter);
 
-        back.setOnClickListener(v -> {
-            sessionId = null;
-            approvalViews.clear();
-            showSessions();
-        });
         stop.setOnClickListener(v -> io.execute(() -> {
             try {
                 api.cancel(sessionId);
@@ -382,20 +400,61 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             try {
                 JSONArray array = api.messages(target);
                 List<JSONObject> rows = new ArrayList<>();
+                long maxSeq = 0;
                 for (int i = 0; i < (array == null ? 0 : array.length()); i++) {
-                    rows.add(array.getJSONObject(i));
+                    JSONObject row = array.getJSONObject(i);
+                    rows.add(row);
+                    maxSeq = Math.max(maxSeq, row.optLong("seq", 0));
                 }
+                final long throughSeq = maxSeq;
                 main.post(() -> {
-                    if (!target.equals(sessionId)) {
+                    if (target == null || !target.equals(sessionId)) {
                         return;
                     }
                     messages.clear();
                     messages.addAll(rows);
+                    lastSeq = throughSeq;
                     chatAdapter.notifyDataSetChanged();
                     scrollToBottom();
                 });
             } catch (Exception exception) {
                 main.post(() -> Toast.makeText(this, friendly(exception), Toast.LENGTH_LONG).show());
+            }
+        });
+    }
+
+    /** Pull only what was missed while the stream was disconnected. */
+    private void syncMessages() {
+        if (api == null || sessionId == null || chatAdapter == null) {
+            return;
+        }
+        final String target = sessionId;
+        final long since = lastSeq;
+        io.execute(() -> {
+            try {
+                JSONArray array = api.messages(target, since);
+                List<JSONObject> rows = new ArrayList<>();
+                long maxSeq = since;
+                for (int i = 0; i < (array == null ? 0 : array.length()); i++) {
+                    JSONObject row = array.getJSONObject(i);
+                    rows.add(row);
+                    maxSeq = Math.max(maxSeq, row.optLong("seq", 0));
+                }
+                final long throughSeq = maxSeq;
+                if (rows.isEmpty()) {
+                    return;
+                }
+                main.post(() -> {
+                    if (target == null || !target.equals(sessionId)) {
+                        return;
+                    }
+                    messages.addAll(rows);
+                    lastSeq = Math.max(lastSeq, throughSeq);
+                    chatAdapter.notifyDataSetChanged();
+                    scrollToBottom();
+                });
+            } catch (Exception ignored) {
+                // The stream will retry; the next reconnect pulls again.
             }
         });
     }
@@ -466,6 +525,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         uploading = true;
         attachButton.setEnabled(false);
+        attachButton.setAlpha(0.4f);
         if (chatStatus != null) {
             chatStatus.setText("正在上传 " + fileName + "…");
         }
@@ -480,6 +540,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     uploading = false;
                     if (attachButton != null) {
                         attachButton.setEnabled(true);
+                        attachButton.setAlpha(1f);
                     }
                     if (composer != null) {
                         composer.setText("");
@@ -493,6 +554,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     uploading = false;
                     if (attachButton != null) {
                         attachButton.setEnabled(true);
+                        attachButton.setAlpha(1f);
                     }
                     String message = friendly(exception);
                     if (chatStatus != null) {
@@ -510,10 +572,16 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     public void onFrame(JSONObject frame) {
         String kind = frame.optString("kind");
         if ("message".equals(kind)) {
-            if (sessionId != null && sessionId.equals(frame.optString("sessionId")) && chatAdapter != null) {
-                messages.add(frame);
-                chatAdapter.notifyDataSetChanged();
-                scrollToBottom();
+            if (sessionId != null && sessionId.equals(frame.optString("sessionId"))) {
+                long seq = frame.optLong("seq", 0);
+                if (seq > lastSeq) {
+                    lastSeq = seq;
+                    messages.add(frame);
+                    if (chatAdapter != null) {
+                        chatAdapter.notifyDataSetChanged();
+                        scrollToBottom();
+                    }
+                }
             } else if (sessionsVisible && System.currentTimeMillis() - lastSessionRefresh > 2000) {
                 loadSessions();
             }
@@ -531,9 +599,16 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     public void onConnection(boolean connected) {
         if (chatStatus != null && sessionId != null) {
             chatStatus.setText(connected ? "已连接" : "连接中断，正在重连…");
+            if (connected) {
+                syncMessages();
+            }
         }
         if (sessionStatus != null && sessionsVisible) {
-            sessionStatus.setText(connected ? sessionStatus.getText() : "连接中断，正在重连…");
+            sessionStatus.setText(connected ? (sessions.isEmpty() ? "还没有会话" : sessions.size() + " 个会话")
+                    : "连接中断，正在重连…");
+            if (connected) {
+                loadSessions();
+            }
         }
     }
 
@@ -565,21 +640,13 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         String reason = approval.optString("reason", "");
         if (!reason.isEmpty()) {
             TextView reasonView = label(reason, 13, TEXT, false);
-            reasonView.setPadding(0, dp(4), 0, dp(10));
+            reasonView.setPadding(0, dp(6), 0, dp(10));
             card.addView(reasonView);
         }
 
         LinearLayout buttons = row();
-        Button allow = new Button(this);
-        allow.setText("允许一次");
-        allow.setAllCaps(false);
-        allow.setTextColor(Color.WHITE);
-        allow.setBackground(roundRect(0xFF188038, 12));
-        Button deny = new Button(this);
-        deny.setText("拒绝");
-        deny.setAllCaps(false);
-        deny.setBackground(roundRect(0xFFE8EAED, 12));
-        deny.setTextColor(TEXT);
+        Button allow = button("允许一次", GREEN, Color.WHITE);
+        Button deny = button("拒绝", LINE, TEXT);
 
         LinearLayout.LayoutParams allowParams = new LinearLayout.LayoutParams(0, dp(44), 1);
         allowParams.rightMargin = dp(8);
@@ -612,7 +679,16 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
     // ---------- 适配器 ----------
 
+    private static final class SessionHolder {
+        View dot;
+        TextView title;
+        TextView subtitle;
+        LinearLayout row;
+    }
+
     private final class SessionAdapter extends BaseAdapter {
+        private final int ROW = 0;
+
         @Override
         public int getCount() {
             return sessions.size();
@@ -630,52 +706,70 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
+            SessionHolder holder;
+            if (convertView == null) {
+                LinearLayout row = new LinearLayout(MainActivity.this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(16), dp(12), dp(16), dp(12));
+                row.setBackgroundColor(Color.WHITE);
+
+                View dot = new View(MainActivity.this);
+                GradientDrawable dotShape = new GradientDrawable();
+                dotShape.setShape(GradientDrawable.OVAL);
+                dotShape.setColor(0xFFC4C8CE);
+                dot.setBackground(dotShape);
+                LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(8), dp(8));
+                dotParams.rightMargin = dp(12);
+                row.addView(dot, dotParams);
+
+                LinearLayout texts = new LinearLayout(MainActivity.this);
+                texts.setOrientation(LinearLayout.VERTICAL);
+                TextView title = label("", 16, TEXT, true);
+                TextView subtitle = label("", 12, MUTED, false);
+                subtitle.setMaxLines(1);
+                subtitle.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                texts.addView(title);
+                texts.addView(subtitle);
+                row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+                View divider = new View(MainActivity.this);
+                divider.setBackgroundColor(LINE);
+
+                LinearLayout wrapper = new LinearLayout(MainActivity.this);
+                wrapper.setOrientation(LinearLayout.VERTICAL);
+                wrapper.addView(row);
+                wrapper.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+
+                holder = new SessionHolder();
+                holder.row = row;
+                holder.dot = dot;
+                holder.title = title;
+                holder.subtitle = subtitle;
+                wrapper.setTag(holder);
+                convertView = wrapper;
+            } else {
+                holder = (SessionHolder) convertView.getTag();
+            }
+
             JSONObject session = sessions.get(position);
             boolean running = session.optBoolean("running");
-            String cwd = session.optString("cwd", "");
+            holder.title.setText(titleOf(session));
+            holder.subtitle.setText((running ? "运行中" : "空闲") + " · " + session.optString("cwd", ""));
 
-            LinearLayout row = new LinearLayout(MainActivity.this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setPadding(dp(16), dp(12), dp(16), dp(12));
-            row.setBackgroundColor(Color.WHITE);
+            GradientDrawable dotShape = new GradientDrawable();
+            dotShape.setShape(GradientDrawable.OVAL);
+            dotShape.setColor(running ? GREEN : 0xFFC4C8CE);
+            holder.dot.setBackground(dotShape);
 
-            View dot = new View(MainActivity.this);
-            GradientDrawable dotDrawable = new GradientDrawable();
-            dotDrawable.setShape(GradientDrawable.OVAL);
-            dotDrawable.setColor(running ? 0xFF188038 : 0xFFC4C8CE);
-            dot.setBackground(dotDrawable);
-            LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(8), dp(8));
-            dotParams.rightMargin = dp(12);
-            row.addView(dot, dotParams);
-
-            LinearLayout texts = new LinearLayout(MainActivity.this);
-            texts.setOrientation(LinearLayout.VERTICAL);
-            texts.addView(label(titleOf(session), 16, TEXT, true));
-            TextView subtitle = label((running ? "运行中" : "空闲") + " · " + cwd, 12, MUTED, false);
-            subtitle.setMaxLines(1);
-            subtitle.setEllipsize(android.text.TextUtils.TruncateAt.MIDDLE);
-            texts.addView(subtitle);
-            row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-            View divider = new View(MainActivity.this);
-            divider.setBackgroundColor(0xFFE8EAED);
-            LinearLayout wrapper = new LinearLayout(MainActivity.this);
-            wrapper.setOrientation(LinearLayout.VERTICAL);
-            wrapper.addView(row);
-            wrapper.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-
-            // The ListView's own item-click does not fire for this composed row, so the row
-            // itself carries the navigation intent.
             final String id = session.optString("id");
             final String title = titleOf(session);
-            row.setClickable(true);
-            row.setOnClickListener(v -> {
+            holder.row.setOnClickListener(v -> {
                 sessionId = id;
                 sessionTitle = title;
                 showChat();
             });
-            return wrapper;
+            return convertView;
         }
     }
 
@@ -697,43 +791,73 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
+            FrameLayout holder;
+            TextView bubble;
+            if (convertView == null) {
+                holder = new FrameLayout(MainActivity.this);
+                bubble = new TextView(MainActivity.this);
+                bubble.setTextIsSelectable(true);
+                bubble.setLineSpacing(dp(2), 1f);
+                holder.addView(bubble, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                holder.setTag(bubble);
+                convertView = holder;
+            } else {
+                holder = (FrameLayout) convertView;
+                bubble = (TextView) holder.getTag();
+            }
+
             JSONObject message = messages.get(position);
             String role = message.optString("role");
-            String text = message.optString("text");
+            bubble.setText(message.optString("text"));
+            bubble.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.78f));
 
-            FrameLayout holder = new FrameLayout(MainActivity.this);
-            TextView view = new TextView(MainActivity.this);
-            view.setText(text);
-            view.setTextSize("tool".equals(role) ? 12 : 15);
-            view.setLineSpacing(dp(2), 1f);
-            view.setPadding(dp(14), dp(10), dp(14), dp(10));
-            view.setTextIsSelectable(true);
-
-            GradientDrawable background = new GradientDrawable();
-            background.setCornerRadius(dp(14));
-            if ("user".equals(role)) {
-                background.setColor(ACCENT);
-                view.setTextColor(Color.WHITE);
-            } else if ("tool".equals(role)) {
-                background.setColor(0x00000000);
-                view.setTextColor(MUTED);
-            } else {
-                background.setColor(PANEL);
-                view.setTextColor(TEXT);
-            }
-            view.setBackground(background);
-            view.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.78f));
-
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) bubble.getLayoutParams();
             params.gravity = "user".equals(role) ? Gravity.END : Gravity.START;
             params.leftMargin = dp(12);
             params.rightMargin = dp(12);
             params.topMargin = dp(3);
             params.bottomMargin = dp(3);
-            holder.addView(view, params);
-            return holder;
+            bubble.setLayoutParams(params);
+
+            if ("user".equals(role)) {
+                bubble.setTextSize(15);
+                bubble.setTextColor(Color.WHITE);
+                bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
+                bubble.setBackground(bubbleUser());
+            } else if ("tool".equals(role)) {
+                bubble.setTextSize(12);
+                bubble.setTextColor(MUTED);
+                bubble.setPadding(dp(14), dp(4), dp(14), dp(4));
+                bubble.setBackground(null);
+            } else {
+                bubble.setTextSize(15);
+                bubble.setTextColor(TEXT);
+                bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
+                bubble.setBackground(bubbleAssistant());
+            }
+            return convertView;
         }
+    }
+
+    private Drawable bubbleUser() {
+        if (bubbleUser == null) {
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(ACCENT);
+            shape.setCornerRadius(dp(14));
+            bubbleUser = shape;
+        }
+        return bubbleUser;
+    }
+
+    private Drawable bubbleAssistant() {
+        if (bubbleAssistant == null) {
+            GradientDrawable shape = new GradientDrawable();
+            shape.setColor(PANEL);
+            shape.setCornerRadius(dp(14));
+            bubbleAssistant = shape;
+        }
+        return bubbleAssistant;
     }
 
     // ---------- 控件 ----------
@@ -802,23 +926,29 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         return view;
     }
 
-    private Button primaryButton(String text) {
+    /** One button shape everywhere: flat, fixed height, ripple feedback. */
+    private Button button(String text, int background, int textColor) {
         Button button = new Button(this);
         button.setText(text);
         button.setAllCaps(false);
-        button.setTextColor(Color.WHITE);
-        button.setBackground(roundRect(ACCENT, 12));
+        button.setTextSize(14);
+        button.setTextColor(textColor);
+        button.setStateListAnimator(null);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(dp(12), 0, dp(12), 0);
+        button.setBackground(ripple(background, 12,
+                background == PANEL ? 0x1F000000 : 0x33FFFFFF));
         return button;
     }
 
-    private Button smallButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(13);
-        button.setTextColor(ACCENT);
-        button.setBackground(roundRect(PANEL, 12));
-        return button;
+    private Drawable ripple(int color, int radius, int rippleColor) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(dp(radius));
+        return new RippleDrawable(ColorStateList.valueOf(rippleColor), shape, null);
     }
 
     private GradientDrawable roundRect(int color, int radius) {

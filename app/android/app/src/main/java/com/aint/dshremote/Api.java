@@ -124,7 +124,14 @@ public final class Api {
     }
 
     public JSONArray messages(String sessionId) throws IOException {
-        return request("/api/sessions/" + enc(sessionId) + "/messages", "GET", null).optJSONArray("messages");
+        return messages(sessionId, 0);
+    }
+
+    /** Fetches the conversation surface, optionally only events newer than {@code since}. */
+    public JSONArray messages(String sessionId, long since) throws IOException {
+        String query = since > 0 ? "?since=" + since : "";
+        return request("/api/sessions/" + enc(sessionId) + "/messages" + query, "GET", null)
+                .optJSONArray("messages");
     }
 
     public void prompt(String sessionId, String text) throws IOException {
