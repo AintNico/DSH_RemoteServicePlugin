@@ -225,35 +225,19 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         sessionsVisible = false;
         sessionId = null;
 
-        LinearLayout root = column(24);
-        root.setGravity(Gravity.CENTER_VERTICAL);
+        View root = getLayoutInflater().inflate(R.layout.activity_pairing, null);
+        final EditText server = root.findViewById(R.id.pairing_server);
+        final EditText code = root.findViewById(R.id.pairing_code);
+        final EditText device = root.findViewById(R.id.pairing_device);
+        Button pair = root.findViewById(R.id.pairing_submit);
+        Button discover = root.findViewById(R.id.pairing_discover);
+        final TextView error = root.findViewById(R.id.pairing_error);
 
-        root.addView(label("连接到 DSH 插件", 24, TEXT, true));
-        root.addView(space(6));
-        root.addView(label("配对码在电脑端窗口里：左下角「配对码」按钮。", 13, MUTED, false));
-        root.addView(space(20));
-
-        EditText server = input("服务地址", prefs.server(), InputType.TYPE_TEXT_VARIATION_URI);
-        EditText code = input("配对码", "", InputType.TYPE_CLASS_NUMBER);
-        code.setMaxEms(6);
-        EditText device = input("设备名称", android.os.Build.MODEL, InputType.TYPE_CLASS_TEXT);
-        root.addView(server);
-        root.addView(space(10));
-        root.addView(code);
-        root.addView(space(10));
-        root.addView(device);
-        root.addView(space(18));
-
-        Button pair = button("配对", ACCENT, Color.WHITE);
-        root.addView(pair, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
-
-        root.addView(space(10));
-        Button discover = button("自动发现电脑", PANEL, ACCENT);
-        root.addView(discover, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
-
-        TextView error = label("", 13, DANGER, false);
-        root.addView(space(10));
-        root.addView(error);
+        server.setText(prefs.server());
+        server.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+        code.setInputType(InputType.TYPE_CLASS_NUMBER);
+        device.setInputType(InputType.TYPE_CLASS_TEXT);
+        device.setText(android.os.Build.MODEL);
 
         discover.setOnClickListener(v -> {
             discover.setEnabled(false);
@@ -344,32 +328,16 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         pendingRow = null;
         pendingLabel = null;
 
-        LinearLayout root = column(0);
+        View root = getLayoutInflater().inflate(R.layout.activity_sessions, null);
 
-        LinearLayout header = row();
-        header.setPadding(dp(16), dp(14), dp(16), dp(10));
-        header.addView(label("会话", 20, TEXT, true), weight(1));
-        refreshButton = button("刷新", PANEL, ACCENT);
-        header.addView(refreshButton, new LinearLayout.LayoutParams(dp(72), dp(40)));
-        refreshButton.setOnClickListener(v -> loadSessions(true));
-        root.addView(header);
+        refreshButton = root.findViewById(R.id.sessions_refresh);
+        sessionStatus = root.findViewById(R.id.sessions_status);
+        ListView list = root.findViewById(R.id.sessions_list);
+        Button unpair = root.findViewById(R.id.sessions_unpair);
 
-        sessionStatus = label("正在加载…", 12, MUTED, false);
-        sessionStatus.setPadding(dp(16), 0, dp(16), dp(8));
-        root.addView(sessionStatus);
-
-        ListView list = new ListView(this);
-        list.setDivider(null);
-        list.setDividerHeight(0);
         sessionAdapter = new SessionAdapter();
         list.setAdapter(sessionAdapter);
-        root.addView(list, verticalWeight(1));
-
-        LinearLayout footer = row();
-        footer.setPadding(dp(16), dp(10), dp(16), dp(16));
-        Button unpair = button("解除配对", PANEL, ACCENT);
-        footer.addView(unpair, new LinearLayout.LayoutParams(dp(104), dp(40)));
-        root.addView(footer);
+        refreshButton.setOnClickListener(v -> loadSessions(true));
 
         unpair.setOnClickListener(v -> {
             prefs.clear();
@@ -614,95 +582,33 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         sessionsVisible = false;
         lastSeq = 0;
 
-        LinearLayout root = column(0);
+        View root = getLayoutInflater().inflate(R.layout.activity_chat, null);
 
-        LinearLayout header = row();
-        header.setPadding(dp(8), dp(10), dp(14), dp(8));
+        TextView back = root.findViewById(R.id.chat_back);
+        TextView titleView = root.findViewById(R.id.chat_title);
+        chatStatus = root.findViewById(R.id.chat_status);
+        chatList = root.findViewById(R.id.chat_list);
+        approvalBox = root.findViewById(R.id.approval_box);
+        pendingRow = root.findViewById(R.id.pending_row);
+        pendingLabel = root.findViewById(R.id.pending_label);
+        Button clearAttachment = root.findViewById(R.id.pending_clear);
+        attachButton = root.findViewById(R.id.chat_attach);
+        composer = root.findViewById(R.id.chat_composer);
+        Button send = root.findViewById(R.id.chat_send);
+        Button files = root.findViewById(R.id.chat_files);
+        Button stop = root.findViewById(R.id.chat_stop);
 
-        TextView back = label("‹", 30, ACCENT, true);
-        back.setPadding(dp(12), 0, dp(10), dp(4));
+        titleView.setText(sessionTitle == null ? "" : sessionTitle);
+        chatStatus.setText(LiveLink.get().connected() ? "已连接" : "连接中…");
         back.setOnClickListener(v -> onBackPressed());
-        header.addView(back);
+        clearAttachment.setOnClickListener(v -> clearPending());
 
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-        TextView titleView = label(sessionTitle == null ? "" : sessionTitle, 17, TEXT, true);
-        titleView.setSingleLine(true);
-        titleView.setEllipsize(TextUtils.TruncateAt.END);
-        titleBox.addView(titleView);
-        chatStatus = label(LiveLink.get().connected() ? "已连接" : "连接中…", 11, MUTED, false);
-        titleBox.addView(chatStatus);
-        header.addView(titleBox, weight(1));
-
-        Button files = button("文件", PANEL, ACCENT);
-        LinearLayout.LayoutParams filesParams = new LinearLayout.LayoutParams(dp(60), dp(40));
-        filesParams.rightMargin = dp(8);
-        header.addView(files, filesParams);
-
-        Button stop = button("停止", PANEL, ACCENT);
-        header.addView(stop, new LinearLayout.LayoutParams(dp(60), dp(40)));
-        root.addView(header);
-
-        View divider = new View(this);
-        divider.setBackgroundColor(LINE);
-        root.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-
-        chatList = new ListView(this);
-        chatList.setDivider(null);
-        chatList.setDividerHeight(0);
-        chatList.setClipToPadding(false);
-        chatList.setPadding(0, dp(6), 0, dp(6));
         chatAdapter = new ChatAdapter();
         chatList.setAdapter(chatAdapter);
-        root.addView(chatList, verticalWeight(1));
-
-        approvalBox = new LinearLayout(this);
-        approvalBox.setOrientation(LinearLayout.VERTICAL);
-        approvalBox.setPadding(dp(12), 0, dp(12), dp(6));
-        root.addView(approvalBox);
-
-        LinearLayout composerRow = row();
-        composerRow.setPadding(dp(10), dp(8), dp(10), dp(14));
-
-        pendingRow = row();
-        pendingRow.setPadding(dp(12), dp(6), dp(8), dp(2));
-        pendingRow.setVisibility(View.GONE);
-        pendingLabel = label("", 13, TEXT, false);
-        pendingLabel.setSingleLine(true);
-        pendingLabel.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        pendingRow.addView(pendingLabel, weight(1));
-        Button clearAttachment = button("✕", PANEL, MUTED);
-        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(dp(36), dp(36));
-        clearParams.leftMargin = dp(8);
-        pendingRow.addView(clearAttachment, clearParams);
-        clearAttachment.setOnClickListener(v -> clearPending());
-        root.addView(pendingRow);
-
-        attachButton = button("＋", PANEL, ACCENT);
-        attachButton.setTextSize(20);
-        LinearLayout.LayoutParams attachParams = new LinearLayout.LayoutParams(dp(46), dp(46));
-        attachParams.rightMargin = dp(8);
-        composerRow.addView(attachButton, attachParams);
-
-        composer = new EditText(this);
-        composer.setHint("输入消息");
-        composer.setBackground(roundRect(PANEL, 14));
-        composer.setPadding(dp(14), dp(10), dp(14), dp(10));
-        composer.setMaxLines(4);
-        composer.setTextSize(15);
-        composerRow.addView(composer, weight(1));
-
-        Button send = button("发送", ACCENT, Color.WHITE);
-        LinearLayout.LayoutParams sendParams = new LinearLayout.LayoutParams(dp(72), dp(46));
-        sendParams.leftMargin = dp(8);
-        composerRow.addView(send, sendParams);
-
-        root.addView(composerRow);
 
         messages.clear();
         streamingMessage = null;
         streamBuffer = null;
-        chatList.setAdapter(chatAdapter);
 
         stop.setOnClickListener(v -> io.execute(() -> {
             try {
@@ -961,35 +867,25 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         final String target = sessionId;
 
         Dialog dialog = new Dialog(this);
-        LinearLayout box = column(16);
+        LinearLayout box = (LinearLayout) getLayoutInflater().inflate(R.layout.dialog_workspace, null);
+        TextView pathView = box.findViewById(R.id.workspace_path);
+        ScrollView scroll = box.findViewById(R.id.workspace_scroll);
+        LinearLayout rows = box.findViewById(R.id.workspace_rows);
+        TextView status = box.findViewById(R.id.workspace_status);
+        Button up = box.findViewById(R.id.workspace_up);
+        Button close = box.findViewById(R.id.workspace_close);
 
-        TextView pathView = label(".", 14, TEXT, true);
-        ScrollView scroll = new ScrollView(this);
-        LinearLayout rows = new LinearLayout(this);
-        rows.setOrientation(LinearLayout.VERTICAL);
-        scroll.addView(rows);
-
-        TextView status = label("", 12, MUTED, false);
-        LinearLayout actions = row();
-        Button up = button("上一级", PANEL, ACCENT);
-        Button close = button("关闭", PANEL, ACCENT);
-        LinearLayout.LayoutParams upParams = new LinearLayout.LayoutParams(0, dp(40), 1);
-        upParams.rightMargin = dp(8);
-        actions.addView(up, upParams);
-        actions.addView(close, new LinearLayout.LayoutParams(0, dp(40), 1));
-
-        box.addView(pathView);
-        // Fixed pixel height: a weighted child inside a Dialog only works when the content
-        // view is measured exactly, which is not guaranteed across themes.
-        int listHeight = (int) (getResources().getDisplayMetrics().heightPixels * 0.52f);
-        box.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, listHeight));
-        box.addView(status);
-        box.addView(actions);
+        // The list gets a fixed height: a weighted child only resolves when the dialog is
+        // measured exactly, which the platform does not guarantee here.
+        LinearLayout.LayoutParams scrollParams = (LinearLayout.LayoutParams) scroll.getLayoutParams();
+        scrollParams.weight = 0f;
+        scrollParams.height = (int) (getResources().getDisplayMetrics().heightPixels * 0.52f);
+        scroll.setLayoutParams(scrollParams);
 
         dialog.setContentView(box);
         dialog.show();
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawable(roundRect(Color.WHITE, 16));
+            dialog.getWindow().setBackgroundDrawableResource(R.drawable.bg_dialog);
             dialog.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
         }
 
@@ -1011,7 +907,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     main.post(() -> {
                         rows.removeAllViews();
                         if (items.isEmpty()) {
-                            rows.addView(label("（空目录）", 13, MUTED, false));
+                            TextView empty = new TextView(this);
+                            empty.setText("（空目录）");
+                            empty.setTextSize(13);
+                            empty.setTextColor(getColor(R.color.muted));
+                            rows.addView(empty);
                         }
                         for (JSONObject entry : items) {
                             final String name = entry.optString("name");
@@ -1019,31 +919,23 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                             final long size = entry.optLong("size", -1);
                             final String fullPath = ".".equals(path) ? name : path + "/" + name;
 
-                            LinearLayout rowView = new LinearLayout(this);
-                            rowView.setOrientation(LinearLayout.HORIZONTAL);
-                            rowView.setGravity(Gravity.CENTER_VERTICAL);
-                            rowView.setPadding(dp(8), dp(6), dp(8), dp(6));
-                            rowView.setMinimumHeight(dp(48));
-                            rowView.setBackground(rowRipple());
+                            View rowView = getLayoutInflater().inflate(R.layout.item_workspace_entry, rows, false);
+                            TextView icon = rowView.findViewById(R.id.entry_icon);
+                            TextView nameView = rowView.findViewById(R.id.entry_name);
+                            TextView meta = rowView.findViewById(R.id.entry_meta);
 
-                            TextView icon = label(directory ? "📁" : "📄", 16, TEXT, false);
-                            icon.setPadding(0, 0, dp(10), 0);
-                            rowView.addView(icon);
-
-                            LinearLayout texts = new LinearLayout(this);
-                            texts.setOrientation(LinearLayout.VERTICAL);
-                            TextView nameView = label(name, 14, TEXT, directory);
-                            nameView.setSingleLine(true);
-                            nameView.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-                            texts.addView(nameView);
-                            TextView metaView = null;
+                            icon.setText(directory ? "📁" : "📄");
+                            nameView.setText(name);
+                            nameView.setTypeface(null, directory
+                                    ? android.graphics.Typeface.BOLD
+                                    : android.graphics.Typeface.NORMAL);
                             if (!directory && size > 0) {
-                                metaView = label(formatSize(size), 11, MUTED, false);
-                                texts.addView(metaView);
+                                meta.setText(formatSize(size));
+                                meta.setVisibility(View.VISIBLE);
+                            } else {
+                                meta.setVisibility(View.GONE);
                             }
-                            rowView.addView(texts, weight(1));
 
-                            final TextView meta = metaView;
                             rowView.setOnClickListener(v -> {
                                 if (directory) {
                                     current[0] = fullPath;
@@ -1073,33 +965,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             refresh[0].run();
         });
         close.setOnClickListener(v -> dialog.dismiss());
-
-        dialog.setOnDismissListener(d -> {
-            // Nothing to release; the work list is owned by the closure.
-        });
         refresh[0].run();
     }
 
-    /**
-     * A ripple clipped to the row. Without a mask the ripple is unbounded and paints a huge
-     * circle over the dialog.
-     */
-    private Drawable rowRipple() {
-        GradientDrawable mask = new GradientDrawable();
-        mask.setColor(Color.WHITE);
-        mask.setCornerRadius(dp(10));
-        return new RippleDrawable(ColorStateList.valueOf(0x24000000), null, mask);
-    }
-
-    /**
-     * Downloads into the app cache first. The file is only offered — share it straight to
-     * another app, or explicitly save it to 下载/DSH. Nothing lands in Downloads unless the
-     * user asks for it.
-     */
-    /**
-     * Tapping a file opens this chooser; nothing is downloaded until an action is picked, so
-     * "分享" and "保存到下载" never race each other.
-     */
     private void chooseFileAction(String target, String fullPath, String name, TextView status) {
         new AlertDialog.Builder(this)
                 .setTitle(name)
@@ -1383,37 +1251,26 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
         String id = approval.optString("id");
 
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(14), dp(12), dp(14), dp(12));
-        card.setBackground(roundRect(0xFFFFF4E5, 14));
-        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardParams.bottomMargin = dp(8);
+        View card = getLayoutInflater().inflate(R.layout.item_approval, approvalBox, false);
+        TextView title = card.findViewById(R.id.approval_title);
+        TextView reasonView = card.findViewById(R.id.approval_reason);
+        Button allow = card.findViewById(R.id.approval_allow);
+        Button deny = card.findViewById(R.id.approval_deny);
 
-        card.addView(label("待审批 · " + approval.optString("toolName", "工具调用"), 14, TEXT, true));
+        title.setText("待审批 · " + approval.optString("toolName", "工具调用"));
         String reason = approval.optString("reason", "");
-        if (!reason.isEmpty()) {
-            TextView reasonView = label(reason, 13, TEXT, false);
-            reasonView.setPadding(0, dp(6), 0, dp(10));
-            card.addView(reasonView);
-        }
-
-        LinearLayout buttons = row();
-        Button allow = button("允许一次", GREEN, Color.WHITE);
-        Button deny = button("拒绝", LINE, TEXT);
-
-        LinearLayout.LayoutParams allowParams = new LinearLayout.LayoutParams(0, dp(44), 1);
-        allowParams.rightMargin = dp(8);
-        buttons.addView(allow, allowParams);
-        buttons.addView(deny, new LinearLayout.LayoutParams(0, dp(44), 1));
-        card.addView(buttons);
+        reasonView.setText(reason);
+        reasonView.setVisibility(reason.isEmpty() ? View.GONE : View.VISIBLE);
 
         allow.setOnClickListener(v -> answer(id, "allowed-once", card));
         deny.setOnClickListener(v -> answer(id, "rejected", card));
 
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = dp(8);
+
         approvalViews.put(id, card);
-        approvalBox.addView(card, cardParams);
+        approvalBox.addView(card, params);
     }
 
     private void answer(String id, String outcome, View card) {
@@ -1479,108 +1336,49 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         public View getView(int position, View convertView, ViewGroup parent) {
             ListRow item = sessionRows.get(position);
             if (item.section) {
-                return sectionView(item, convertView);
+                return sectionView(item, convertView, parent);
             }
-            return sessionView(item.session, convertView);
+            return sessionView(item.session, convertView, parent);
         }
 
-        private View sectionView(ListRow item, View convertView) {
-            LinearLayout box;
-            TextView title;
-            TextView subtitle;
-            if (convertView == null || !(convertView.getTag() instanceof SectionHolder)) {
-                box = new LinearLayout(MainActivity.this);
-                box.setOrientation(LinearLayout.VERTICAL);
-                box.setPadding(dp(16), dp(16), dp(16), dp(6));
-                box.setBackgroundColor(Color.WHITE);
-
-                title = label("", 13, MUTED, true);
-                subtitle = label("", 11, MUTED, false);
-                subtitle.setSingleLine(true);
-                subtitle.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-                box.addView(title);
-                box.addView(subtitle);
-
-                SectionHolder holder = new SectionHolder();
-                holder.title = title;
-                holder.subtitle = subtitle;
-                box.setTag(holder);
-                convertView = box;
-            } else {
-                box = (LinearLayout) convertView;
-                SectionHolder holder = (SectionHolder) convertView.getTag();
-                title = holder.title;
-                subtitle = holder.subtitle;
-            }
+        private View sectionView(ListRow item, View convertView, ViewGroup parent) {
+            View view = convertView != null
+                    ? convertView
+                    : getLayoutInflater().inflate(R.layout.item_session_section, parent, false);
+            TextView title = view.findViewById(R.id.session_section_title);
+            TextView detail = view.findViewById(R.id.session_section_detail);
             title.setText(item.title);
-            subtitle.setText(item.subtitle);
-            return convertView;
+            detail.setText(item.subtitle);
+            return view;
         }
 
-        private View sessionView(JSONObject session, View convertView) {
-            SessionHolder holder;
-            if (convertView == null || !(convertView.getTag() instanceof SessionHolder)) {
-                LinearLayout row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setPadding(dp(28), dp(11), dp(16), dp(11));
-                row.setBackgroundColor(Color.WHITE);
+        private View sessionView(JSONObject session, View convertView, ViewGroup parent) {
+            View view = convertView != null
+                    ? convertView
+                    : getLayoutInflater().inflate(R.layout.item_session, parent, false);
 
-                View dot = new View(MainActivity.this);
-                GradientDrawable dotShape = new GradientDrawable();
-                dotShape.setShape(GradientDrawable.OVAL);
-                dotShape.setColor(0xFFC4C8CE);
-                dot.setBackground(dotShape);
-                LinearLayout.LayoutParams dotParams = new LinearLayout.LayoutParams(dp(8), dp(8));
-                dotParams.rightMargin = dp(12);
-                row.addView(dot, dotParams);
-
-                LinearLayout texts = new LinearLayout(MainActivity.this);
-                texts.setOrientation(LinearLayout.VERTICAL);
-                TextView title = label("", 16, TEXT, true);
-                TextView subtitle = label("", 12, MUTED, false);
-                subtitle.setMaxLines(1);
-                subtitle.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-                texts.addView(title);
-                texts.addView(subtitle);
-                row.addView(texts, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-
-                View divider = new View(MainActivity.this);
-                divider.setBackgroundColor(LINE);
-
-                LinearLayout wrapper = new LinearLayout(MainActivity.this);
-                wrapper.setOrientation(LinearLayout.VERTICAL);
-                wrapper.addView(row);
-                wrapper.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-
-                holder = new SessionHolder();
-                holder.row = row;
-                holder.dot = dot;
-                holder.title = title;
-                holder.subtitle = subtitle;
-                wrapper.setTag(holder);
-                convertView = wrapper;
-            } else {
-                holder = (SessionHolder) convertView.getTag();
-            }
+            TextView title = view.findViewById(R.id.session_title);
+            TextView subtitle = view.findViewById(R.id.session_subtitle);
+            View dot = view.findViewById(R.id.session_dot);
+            View row = view.findViewById(R.id.session_row);
 
             boolean running = session.optBoolean("running");
-            holder.title.setText(titleOf(session));
-            holder.subtitle.setText((running ? "运行中" : "空闲") + " · " + session.optString("cwd", ""));
+            title.setText(titleOf(session));
+            subtitle.setText((running ? "运行中" : "空闲") + " · " + session.optString("cwd", ""));
 
             GradientDrawable dotShape = new GradientDrawable();
             dotShape.setShape(GradientDrawable.OVAL);
             dotShape.setColor(running ? GREEN : 0xFFC4C8CE);
-            holder.dot.setBackground(dotShape);
+            dot.setBackground(dotShape);
 
             final String id = session.optString("id");
-            final String title = titleOf(session);
-            holder.row.setOnClickListener(v -> {
+            final String titleText = titleOf(session);
+            row.setOnClickListener(v -> {
                 sessionId = id;
-                sessionTitle = title;
+                sessionTitle = titleText;
                 showChat();
             });
-            return convertView;
+            return view;
         }
     }
 
@@ -1590,6 +1388,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     }
 
     private final class ChatAdapter extends BaseAdapter {
+        private static final int TYPE_USER = 0;
+        private static final int TYPE_ASSISTANT = 1;
+        private static final int TYPE_TOOL = 2;
+
         @Override
         public int getCount() {
             return messages.size();
@@ -1606,114 +1408,48 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
 
         @Override
+        public int getViewTypeCount() {
+            return 3;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            String role = messages.get(position).optString("role");
+            if ("user".equals(role)) {
+                return TYPE_USER;
+            }
+            if ("tool".equals(role)) {
+                return TYPE_TOOL;
+            }
+            return TYPE_ASSISTANT;
+        }
+
+        @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            LinearLayout row;
-            TextView bubble;
-            View leftSpacer;
-            View rightSpacer;
-            Drawable userBg;
-            Drawable assistantBg;
-            if (convertView == null) {
-                row = new LinearLayout(MainActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-
-                leftSpacer = new View(MainActivity.this);
-                rightSpacer = new View(MainActivity.this);
-                bubble = new TextView(MainActivity.this);
-                bubble.setTextIsSelectable(true);
-                bubble.setLineSpacing(dp(2), 1f);
-
-                row.addView(leftSpacer, new LinearLayout.LayoutParams(0, 1, 0));
-                row.addView(bubble, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-                row.addView(rightSpacer, new LinearLayout.LayoutParams(0, 1, 0));
-
-                // One drawable per recycled row instead of per bind.
-                userBg = bubbleUser();
-                assistantBg = bubbleAssistant();
-                row.setTag(new Object[] { bubble, leftSpacer, rightSpacer, userBg, assistantBg });
-                convertView = row;
-            } else {
-                row = (LinearLayout) convertView;
-                Object[] tag = (Object[]) row.getTag();
-                bubble = (TextView) tag[0];
-                leftSpacer = (View) tag[1];
-                rightSpacer = (View) tag[2];
-                userBg = (Drawable) tag[3];
-                assistantBg = (Drawable) tag[4];
+            int type = getItemViewType(position);
+            View view = convertView;
+            if (view == null) {
+                int layout = type == TYPE_USER ? R.layout.item_message_user
+                        : type == TYPE_TOOL ? R.layout.item_message_tool
+                        : R.layout.item_message_assistant;
+                view = getLayoutInflater().inflate(layout, parent, false);
             }
 
+            TextView text = view.findViewById(R.id.message_text);
             JSONObject message = messages.get(position);
-            String role = message.optString("role");
             String raw = message.optString("text");
-            if ("tool".equals(role)) {
-                bubble.setText(raw);
+            if (type == TYPE_TOOL) {
+                text.setText(raw);
             } else {
                 CharSequence rendered = markdownCache.get(message);
                 if (rendered == null) {
                     rendered = Markdown.render(raw);
                     markdownCache.put(message, rendered);
                 }
-                bubble.setText(rendered);
+                text.setText(rendered);
             }
-
-            boolean isUser = "user".equals(role);
-            bubble.setMaxWidth((int) (getResources().getDisplayMetrics().widthPixels * 0.76f));
-
-            LinearLayout.LayoutParams bubbleParams = (LinearLayout.LayoutParams) bubble.getLayoutParams();
-            bubbleParams.leftMargin = dp(12);
-            bubbleParams.rightMargin = dp(12);
-            bubbleParams.topMargin = dp(3);
-            bubbleParams.bottomMargin = dp(3);
-            bubble.setLayoutParams(bubbleParams);
-
-            // A weighted spacer on the opposite side positions the bubble without relying on
-            // gravity, which stays stable across recycled rows.
-            LinearLayout.LayoutParams leftParams = (LinearLayout.LayoutParams) leftSpacer.getLayoutParams();
-            leftParams.weight = isUser ? 1f : 0f;
-            leftSpacer.setLayoutParams(leftParams);
-
-            LinearLayout.LayoutParams rightParams = (LinearLayout.LayoutParams) rightSpacer.getLayoutParams();
-            rightParams.weight = isUser ? 0f : 1f;
-            rightSpacer.setLayoutParams(rightParams);
-
-            if (isUser) {
-                bubble.setTextSize(15);
-                bubble.setTextColor(Color.WHITE);
-                bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
-                bubble.setBackground(userBg);
-            } else if ("tool".equals(role)) {
-                bubble.setTextSize(12);
-                bubble.setTextColor(MUTED);
-                bubble.setPadding(dp(14), dp(4), dp(14), dp(4));
-                bubble.setBackground(null);
-            } else {
-                bubble.setTextSize(15);
-                bubble.setTextColor(TEXT);
-                bubble.setPadding(dp(14), dp(10), dp(14), dp(10));
-                bubble.setBackground(assistantBg);
-            }
-            return convertView;
+            return view;
         }
-    }
-
-    /**
-     * Each bubble gets its own drawable: sharing one instance across recycled views makes the
-     * drawable callback bounce between them, which shows up as bubbles that lose their
-     * background.
-     */
-    private Drawable bubbleUser() {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(ACCENT);
-        shape.setCornerRadius(dp(14));
-        return shape;
-    }
-
-    private Drawable bubbleAssistant() {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(PANEL);
-        shape.setCornerRadius(dp(14));
-        return shape;
     }
 
     // ---------- 控件 ----------
@@ -1743,89 +1479,6 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
 
         setContentView(container);
-    }
-
-    private LinearLayout column(int padding) {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setBackgroundColor(Color.WHITE);
-        layout.setPadding(dp(padding), dp(padding), dp(padding), dp(padding));
-        return layout;
-    }
-
-    private LinearLayout row() {
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.HORIZONTAL);
-        layout.setGravity(Gravity.CENTER_VERTICAL);
-        return layout;
-    }
-
-    private TextView label(String text, int size, int color, boolean bold) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(size);
-        view.setTextColor(color);
-        if (bold) {
-            view.setTypeface(view.getTypeface(), android.graphics.Typeface.BOLD);
-        }
-        return view;
-    }
-
-    private EditText input(String hint, String value, int inputType) {
-        EditText view = new EditText(this);
-        view.setHint(hint);
-        view.setText(value);
-        view.setInputType(inputType);
-        view.setBackground(roundRect(PANEL, 12));
-        view.setPadding(dp(14), dp(12), dp(14), dp(12));
-        view.setSingleLine(true);
-        return view;
-    }
-
-    /** One button shape everywhere: flat, fixed height, ripple feedback. */
-    private Button button(String text, int background, int textColor) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setAllCaps(false);
-        button.setTextSize(14);
-        button.setTextColor(textColor);
-        button.setStateListAnimator(null);
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setPadding(dp(12), 0, dp(12), 0);
-        button.setBackground(ripple(background, 12,
-                background == PANEL ? 0x1F000000 : 0x33FFFFFF));
-        return button;
-    }
-
-    private Drawable ripple(int color, int radius, int rippleColor) {
-        GradientDrawable shape = new GradientDrawable();
-        shape.setColor(color);
-        shape.setCornerRadius(dp(radius));
-        return new RippleDrawable(ColorStateList.valueOf(rippleColor), shape, null);
-    }
-
-    private GradientDrawable roundRect(int color, int radius) {
-        GradientDrawable drawable = new GradientDrawable();
-        drawable.setColor(color);
-        drawable.setCornerRadius(dp(radius));
-        return drawable;
-    }
-
-    private View space(int height) {
-        View view = new View(this);
-        view.setLayoutParams(new LinearLayout.LayoutParams(1, dp(height)));
-        return view;
-    }
-
-    private LinearLayout.LayoutParams weight(int weight) {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
-    }
-
-    private LinearLayout.LayoutParams verticalWeight(int weight) {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, weight);
     }
 
     private int dp(int value) {

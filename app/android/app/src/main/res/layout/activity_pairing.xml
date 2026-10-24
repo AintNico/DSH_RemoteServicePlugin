@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/white"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:id="@+id/pairing_title"
+            style="@style/Text.Title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="连接到 DSH 插件" />
+
+        <TextView
+            android:id="@+id/pairing_hint"
+            style="@style/Text.Hint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="配对码在电脑端窗口里：左下角「配对码」按钮。"
+            android:textSize="13sp" />
+
+        <EditText
+            android:id="@+id/pairing_server"
+            style="@style/Widget.Input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:hint="服务地址"
+            android:inputType="textUri" />
+
+        <EditText
+            android:id="@+id/pairing_code"
+            style="@style/Widget.Input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="配对码"
+            android:inputType="number"
+            android:maxEms="6" />
+
+        <EditText
+            android:id="@+id/pairing_device"
+            style="@style/Widget.Input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="设备名称"
+            android:inputType="text" />
+
+        <Button
+            android:id="@+id/pairing_submit"
+            style="@style/Widget.Btn.Accent"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="18dp"
+            android:text="配对" />
+
+        <Button
+            android:id="@+id/pairing_discover"
+            style="@style/Widget.Btn"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="10dp"
+            android:text="自动发现电脑" />
+
+        <TextView
+            android:id="@+id/pairing_error"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/danger"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</ScrollView>
