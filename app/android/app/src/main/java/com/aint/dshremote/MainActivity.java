@@ -50,8 +50,10 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -950,6 +952,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         TextView status = box.findViewById(R.id.workspace_status);
         Button up = box.findViewById(R.id.workspace_up);
         Button close = box.findViewById(R.id.workspace_close);
+        View selectionBar = box.findViewById(R.id.workspace_selection);
+        Button shareAll = box.findViewById(R.id.workspace_share_all);
+        Button saveAll = box.findViewById(R.id.workspace_save_all);
+        Button cancelSelection = box.findViewById(R.id.workspace_cancel_select);
 
         // The list gets a fixed height: a weighted child only resolves when the dialog is
         // measured exactly, which the platform does not guarantee here.
@@ -966,64 +972,109 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
 
         final String[] current = {"."};
+        final Set<String> selected = new LinkedHashSet<>();
+        final boolean[] selectionMode = {false};
+        final List<JSONObject> items = new ArrayList<>();
+        final Runnable[] paint = new Runnable[1];
         final Runnable[] refresh = new Runnable[1];
 
+        paint[0] = () -> {
+            pathView.setText(current[0]);
+            rows.removeAllViews();
+
+            if (items.isEmpty()) {
+                TextView empty = new TextView(this);
+                empty.setText("（空目录）");
+                empty.setTextSize(13);
+                empty.setTextColor(getColor(R.color.muted));
+                rows.addView(empty);
+            }
+
+            for (JSONObject entry : items) {
+                final String name = entry.optString("name");
+                final boolean directory = entry.optBoolean("directory");
+                final long size = entry.optLong("size", -1);
+                final String fullPath = ".".equals(current[0]) ? name : current[0] + "/" + name;
+
+                View rowView = getLayoutInflater().inflate(R.layout.item_workspace_entry, rows, false);
+                TextView check = rowView.findViewById(R.id.entry_check);
+                TextView icon = rowView.findViewById(R.id.entry_icon);
+                TextView nameView = rowView.findViewById(R.id.entry_name);
+                TextView meta = rowView.findViewById(R.id.entry_meta);
+
+                boolean picked = selected.contains(fullPath);
+                if (selectionMode[0] && !directory) {
+                    check.setVisibility(View.VISIBLE);
+                    check.setText(picked ? "☑" : "☐");
+                    check.setTextColor(getColor(picked ? R.color.accent : R.color.muted));
+                } else {
+                    check.setVisibility(View.GONE);
+                }
+
+                icon.setText(directory ? "📁" : "📄");
+                nameView.setText(name);
+                nameView.setTypeface(null, directory
+                        ? android.graphics.Typeface.BOLD
+                        : android.graphics.Typeface.NORMAL);
+                if (!directory && size > 0) {
+                    meta.setText(formatSize(size));
+                    meta.setVisibility(View.VISIBLE);
+                } else {
+                    meta.setVisibility(View.GONE);
+                }
+
+                rowView.setOnClickListener(v -> {
+                    if (selectionMode[0] && !directory) {
+                        if (!selected.remove(fullPath)) {
+                            selected.add(fullPath);
+                        }
+                        paint[0].run();
+                        return;
+                    }
+                    if (directory) {
+                        current[0] = fullPath;
+                        refresh[0].run();
+                        return;
+                    }
+                    // Nothing is fetched until the user picks an action.
+                    chooseFileAction(target, fullPath, name, status);
+                });
+                rowView.setOnLongClickListener(v -> {
+                    if (directory) {
+                        return false;
+                    }
+                    selectionMode[0] = true;
+                    selected.add(fullPath);
+                    paint[0].run();
+                    return true;
+                });
+                rows.addView(rowView);
+            }
+
+            selectionBar.setVisibility(selectionMode[0] ? View.VISIBLE : View.GONE);
+            status.setText(selectionMode[0]
+                    ? "已选 " + selected.size() + " 项（长按或点选，可多选）"
+                    : items.size() + " 项 · 长按文件可多选");
+        };
+
         refresh[0] = () -> {
-            final String path = current[0];
+            String path = current[0];
             pathView.setText(path);
             status.setText("读取中…");
             io.execute(() -> {
                 try {
                     JSONObject result = api.workspace(target, path);
                     JSONArray entries = result.optJSONArray("entries");
-                    List<JSONObject> items = new ArrayList<>();
+                    List<JSONObject> fetched = new ArrayList<>();
                     for (int i = 0; i < (entries == null ? 0 : entries.length()); i++) {
-                        items.add(entries.getJSONObject(i));
+                        fetched.add(entries.getJSONObject(i));
                     }
                     main.post(() -> {
-                        rows.removeAllViews();
-                        if (items.isEmpty()) {
-                            TextView empty = new TextView(this);
-                            empty.setText("（空目录）");
-                            empty.setTextSize(13);
-                            empty.setTextColor(getColor(R.color.muted));
-                            rows.addView(empty);
-                        }
-                        for (JSONObject entry : items) {
-                            final String name = entry.optString("name");
-                            final boolean directory = entry.optBoolean("directory");
-                            final long size = entry.optLong("size", -1);
-                            final String fullPath = ".".equals(path) ? name : path + "/" + name;
-
-                            View rowView = getLayoutInflater().inflate(R.layout.item_workspace_entry, rows, false);
-                            TextView icon = rowView.findViewById(R.id.entry_icon);
-                            TextView nameView = rowView.findViewById(R.id.entry_name);
-                            TextView meta = rowView.findViewById(R.id.entry_meta);
-
-                            icon.setText(directory ? "📁" : "📄");
-                            nameView.setText(name);
-                            nameView.setTypeface(null, directory
-                                    ? android.graphics.Typeface.BOLD
-                                    : android.graphics.Typeface.NORMAL);
-                            if (!directory && size > 0) {
-                                meta.setText(formatSize(size));
-                                meta.setVisibility(View.VISIBLE);
-                            } else {
-                                meta.setVisibility(View.GONE);
-                            }
-
-                            rowView.setOnClickListener(v -> {
-                                if (directory) {
-                                    current[0] = fullPath;
-                                    refresh[0].run();
-                                    return;
-                                }
-                                // Nothing is fetched until the user picks an action.
-                                chooseFileAction(target, fullPath, name, status);
-                            });
-                            rows.addView(rowView);
-                        }
-                        status.setText(items.size() + " 项");
+                        items.clear();
+                        items.addAll(fetched);
+                        selected.clear();
+                        selectionMode[0] = false;
+                        paint[0].run();
                     });
                 } catch (Exception exception) {
                     main.post(() -> status.setText(friendly(exception)));
@@ -1032,6 +1083,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         };
 
         up.setOnClickListener(v -> {
+            if (selectionMode[0]) {
+                selectionMode[0] = false;
+                selected.clear();
+                paint[0].run();
+                return;
+            }
             if (".".equals(current[0])) {
                 Toast.makeText(this, "已经在工作区根目录", Toast.LENGTH_SHORT).show();
                 return;
@@ -1040,7 +1097,37 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             current[0] = cut > 0 ? current[0].substring(0, cut) : ".";
             refresh[0].run();
         });
-        close.setOnClickListener(v -> dialog.dismiss());
+
+        close.setOnClickListener(v -> {
+            if (selectionMode[0]) {
+                selectionMode[0] = false;
+                selected.clear();
+                paint[0].run();
+                return;
+            }
+            dialog.dismiss();
+        });
+
+        cancelSelection.setOnClickListener(v -> {
+            selectionMode[0] = false;
+            selected.clear();
+            paint[0].run();
+        });
+
+        shareAll.setOnClickListener(v -> {
+            if (selected.isEmpty() || fileDownloadInFlight) {
+                return;
+            }
+            shareWorkspaceFiles(target, new ArrayList<>(selected), status);
+        });
+
+        saveAll.setOnClickListener(v -> {
+            if (selected.isEmpty() || fileDownloadInFlight) {
+                return;
+            }
+            saveWorkspaceFiles(target, new ArrayList<>(selected), status);
+        });
+
         refresh[0].run();
     }
 
@@ -1082,6 +1169,39 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         });
     }
 
+    /** Downloads every selected file, then hands them to one share sheet as a group. */
+    private void shareWorkspaceFiles(String target, List<String> paths, TextView status) {
+        fileDownloadInFlight = true;
+        status.setText("正在准备 " + paths.size() + " 个文件…");
+        io.execute(() -> {
+            List<Uri> uris = new ArrayList<>();
+            String failure = null;
+            for (int index = 0; index < paths.size(); index++) {
+                final int current = index + 1;
+                main.post(() -> status.setText("正在下载 " + current + "/" + paths.size() + "…"));
+                try {
+                    File file = downloadToCache(target, paths.get(index));
+                    uris.add(ShareProvider.uriFor(this, file));
+                } catch (Exception exception) {
+                    failure = friendly(exception);
+                    break;
+                }
+            }
+            final String error = failure;
+            final List<Uri> ready = uris;
+            main.post(() -> {
+                fileDownloadInFlight = false;
+                if (!ready.isEmpty()) {
+                    status.setText("已准备 " + ready.size() + " 个文件");
+                    shareFiles(ready);
+                }
+                if (error != null) {
+                    Toast.makeText(this, "下载失败：" + error, Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+    }
+
     /** Only 分享 needs a local copy; 保存到下载 streams straight into MediaStore. */
     private File downloadToCache(String target, String fullPath) throws Exception {
         JSONObject signed = api.signFile(target, fullPath);
@@ -1101,56 +1221,13 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         fileDownloadInFlight = true;
         status.setText("正在保存到下载…");
         io.execute(() -> {
-            Uri uri = null;
             try {
-                JSONObject signed = api.signFile(target, fullPath);
-                String url = signed.optString("url", "");
-                if (url.isEmpty()) {
-                    throw new Exception("服务端没有返回下载地址");
-                }
-                String fileName = safeFileName(signed.optString("name", fallbackName));
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ContentValues values = new ContentValues();
-                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
-                    values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
-                    values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DSH");
-                    uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                    if (uri == null) {
-                        throw new Exception("无法创建下载文件");
-                    }
-                    try (OutputStream out = getContentResolver().openOutputStream(uri)) {
-                        if (out == null) {
-                            throw new Exception("无法写入下载文件");
-                        }
-                        api.download(url, out);
-                    }
-                    main.post(() -> {
-                        fileDownloadInFlight = false;
-                        status.setText("已保存到 下载/DSH/" + fileName);
-                    });
-                } else {
-                    File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DSH");
-                    if (!dir.exists() && !dir.mkdirs()) {
-                        throw new Exception("无法创建下载目录");
-                    }
-                    File file = new File(dir, fileName);
-                    try (OutputStream out = new FileOutputStream(file)) {
-                        api.download(url, out);
-                    }
-                    main.post(() -> {
-                        fileDownloadInFlight = false;
-                        status.setText("已保存到 " + file.getAbsolutePath());
-                    });
-                }
+                String saved = saveOneToDownloads(target, fullPath, fallbackName);
+                main.post(() -> {
+                    fileDownloadInFlight = false;
+                    status.setText("已保存到 下载/DSH/" + saved);
+                });
             } catch (Exception exception) {
-                if (uri != null) {
-                    try {
-                        getContentResolver().delete(uri, null, null);
-                    } catch (Exception ignored) {
-                        // Best-effort cleanup of the half-written entry.
-                    }
-                }
                 main.post(() -> {
                     fileDownloadInFlight = false;
                     status.setText("保存失败：" + friendly(exception));
@@ -1159,13 +1236,91 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         });
     }
 
+    private void saveWorkspaceFiles(String target, List<String> paths, TextView status) {
+        fileDownloadInFlight = true;
+        status.setText("正在保存 " + paths.size() + " 个文件…");
+        io.execute(() -> {
+            int saved = 0;
+            String failure = null;
+            for (int index = 0; index < paths.size(); index++) {
+                final int current = index + 1;
+                main.post(() -> status.setText("正在保存 " + current + "/" + paths.size() + "…"));
+                try {
+                    saveOneToDownloads(target, paths.get(index), "file");
+                    saved++;
+                } catch (Exception exception) {
+                    failure = friendly(exception);
+                    break;
+                }
+            }
+            final int done = saved;
+            final String error = failure;
+            main.post(() -> {
+                fileDownloadInFlight = false;
+                status.setText(error == null
+                        ? "已保存 " + done + " 个文件到 下载/DSH/"
+                        : "已保存 " + done + " 个，失败：" + error);
+            });
+        });
+    }
+
+    /** Streams one workspace file into MediaStore; returns the stored display name. */
+    private String saveOneToDownloads(String target, String fullPath, String fallbackName) throws Exception {
+        JSONObject signed = api.signFile(target, fullPath);
+        String url = signed.optString("url", "");
+        if (url.isEmpty()) {
+            throw new Exception("服务端没有返回下载地址");
+        }
+        String fileName = safeFileName(signed.optString("name", fallbackName));
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DSH");
+            Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+            if (uri == null) {
+                throw new Exception("无法创建下载文件");
+            }
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
+                if (out == null) {
+                    throw new Exception("无法写入下载文件");
+                }
+                api.download(url, out);
+            }
+        } else {
+            File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DSH");
+            if (!dir.exists() && !dir.mkdirs()) {
+                throw new Exception("无法创建下载目录");
+            }
+            File file = new File(dir, fileName);
+            try (OutputStream out = new FileOutputStream(file)) {
+                api.download(url, out);
+            }
+        }
+        return fileName;
+    }
+
     private void shareFile(File file) {
+        shareFiles(Collections.singletonList(ShareProvider.uriFor(this, file)));
+    }
+
+    private void shareFiles(List<Uri> uris) {
+        if (uris.isEmpty()) {
+            return;
+        }
         try {
-            Uri uri = ShareProvider.uriFor(this, file);
-            Intent send = new Intent(Intent.ACTION_SEND);
-            send.setType(getContentResolver().getType(uri));
-            send.putExtra(Intent.EXTRA_STREAM, uri);
-            send.putExtra(Intent.EXTRA_SUBJECT, file.getName());
+            Intent send;
+            if (uris.size() == 1) {
+                Uri uri = uris.get(0);
+                send = new Intent(Intent.ACTION_SEND);
+                send.setType(getContentResolver().getType(uri));
+                send.putExtra(Intent.EXTRA_STREAM, uri);
+            } else {
+                send = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                send.setType("*/*");
+                send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, new ArrayList<>(uris));
+            }
             send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
             Intent chooser = Intent.createChooser(send, "分享到");
