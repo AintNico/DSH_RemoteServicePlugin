@@ -1392,6 +1392,14 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         private static final int TYPE_ASSISTANT = 1;
         private static final int TYPE_TOOL = 2;
 
+        /**
+         * A bubble may use at most this share of the viewport. Without the cap a long message
+         * grows until only the opposite margin is left, so the bubble looks glued to the far
+         * edge instead of keeping air on both sides.
+         */
+        private final int bubbleMaxWidth =
+                (int) (getResources().getDisplayMetrics().widthPixels * 0.76f);
+
         @Override
         public int getCount() {
             return messages.size();
@@ -1439,8 +1447,10 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             JSONObject message = messages.get(position);
             String raw = message.optString("text");
             if (type == TYPE_TOOL) {
+                // Tool output is plain text, not a bubble: it keeps the full width.
                 text.setText(raw);
             } else {
+                text.setMaxWidth(bubbleMaxWidth);
                 CharSequence rendered = markdownCache.get(message);
                 if (rendered == null) {
                     rendered = Markdown.render(raw);
