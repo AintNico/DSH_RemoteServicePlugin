@@ -154,11 +154,18 @@ public final class Api {
     }
 
     /** Streams one file as an attachment prompt. Returns the server's JSON receipt. */
-    public JSONObject upload(String sessionId, String name, java.io.InputStream data, long size, String caption)
-            throws IOException {
+    /**
+     * Stages one file. With {@code withPrompt=false} the server keeps the upload and only
+     * returns a receipt, so several files can be committed together by {@link #sendBatch}.
+     */
+    public JSONObject upload(String sessionId, String name, java.io.InputStream data, long size,
+                             String caption, boolean withPrompt) throws IOException {
         String path = "/api/sessions/" + enc(sessionId) + "/upload?name=" + enc(name);
         if (caption != null && !caption.isEmpty()) {
             path += "&text=" + enc(caption);
+        }
+        if (!withPrompt) {
+            path += "&prompt=false";
         }
 
         HttpURLConnection connection = open(path, "POST");
@@ -190,6 +197,23 @@ public final class Api {
         } finally {
             connection.disconnect();
         }
+    }
+
+    public JSONObject upload(String sessionId, String name, java.io.InputStream data, long size, String caption)
+            throws IOException {
+        return upload(sessionId, name, data, size, caption, true);
+    }
+
+    /** Commits several staged uploads as one message with optional text. */
+    public JSONObject sendBatch(String sessionId, String text, JSONArray receiptIds) throws IOException {
+        JSONObject body = new JSONObject();
+        try {
+            body.put("text", text == null ? "" : text);
+            body.put("receiptIds", receiptIds);
+        } catch (JSONException error) {
+            throw new IOException("bad batch body: " + error.getMessage(), error);
+        }
+        return request("/api/sessions/" + enc(sessionId) + "/send-batch", "POST", body);
     }
 
     public boolean answer(String approvalId, String outcome) throws IOException {

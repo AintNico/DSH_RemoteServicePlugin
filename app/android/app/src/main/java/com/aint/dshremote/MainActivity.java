@@ -3,6 +3,7 @@ package com.aint.dshremote;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -104,9 +105,20 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private LinearLayout pendingRow;
     private TextView pendingLabel;
 
-    private Uri pendingUri;
-    private String pendingName;
-    private long pendingSize = -1;
+    /** One file waiting to be sent with the next message. */
+    private static final class PendingFile {
+        final Uri uri;
+        final String name;
+        final long size;
+
+        PendingFile(Uri uri, String name, long size) {
+            this.uri = uri;
+            this.name = name;
+            this.size = size;
+        }
+    }
+
+    private final List<PendingFile> pendingFiles = new ArrayList<>();
     private Uri sharedUri;
     private boolean fileDownloadInFlight;
 
@@ -163,18 +175,33 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 uri = (Uri) stream;
             }
         }
-        if (uri == null && intent.getClipData() != null && intent.getClipData().getItemCount() > 0) {
-            uri = intent.getClipData().getItemAt(0).getUri();
+
+        // A multi-file share arrives as ClipData; stage every item.
+        List<Uri> shared = new ArrayList<>();
+        if (intent.getClipData() != null && intent.getClipData().getItemCount() > 0) {
+            ClipData clip = intent.getClipData();
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri item = clip.getItemAt(i).getUri();
+                if (item != null) {
+                    shared.add(item);
+                }
+            }
         }
-        if (uri == null) {
+        if (shared.isEmpty() && uri != null) {
+            shared.add(uri);
+        }
+        if (shared.isEmpty()) {
             return;
         }
 
         if (sessionId != null && chatAdapter != null) {
-            stageAttachment(uri);
-            Toast.makeText(this, "已添加待发送附件", Toast.LENGTH_SHORT).show();
+            for (Uri item : shared) {
+                stageAttachment(item);
+            }
+            Toast.makeText(this, shared.size() == 1 ? "已添加待发送附件" : "已添加 " + shared.size() + " 个待发送文件",
+                    Toast.LENGTH_SHORT).show();
         } else {
-            sharedUri = uri;
+            sharedUri = shared.get(0);
             Toast.makeText(this, "请先打开一个会话，附件的说明文字写完再发送", Toast.LENGTH_LONG).show();
         }
     }
@@ -322,9 +349,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         chatAdapter = null;
         streamingMessage = null;
         streamBuffer = null;
-        pendingUri = null;
-        pendingName = null;
-        pendingSize = -1;
+        pendingFiles.clear();
         pendingRow = null;
         pendingLabel = null;
 
@@ -710,7 +735,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             return;
         }
         String text = composer.getText().toString().trim();
-        if (pendingUri != null) {
+        if (!pendingFiles.isEmpty()) {
             sendAttachment(text);
             return;
         }
@@ -734,19 +759,32 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         startActivityForResult(intent, REQ_PICK_FILE);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode != REQ_PICK_FILE || resultCode != RESULT_OK || data == null || data.getData() == null) {
+        if (requestCode != REQ_PICK_FILE || resultCode != RESULT_OK || data == null) {
             return;
         }
-        stageAttachment(data.getData());
+        if (data.getClipData() != null) {
+            ClipData clip = data.getClipData();
+            for (int i = 0; i < clip.getItemCount(); i++) {
+                Uri uri = clip.getItemAt(i).getUri();
+                if (uri != null) {
+                    stageAttachment(uri);
+                }
+            }
+            return;
+        }
+        if (data.getData() != null) {
+            stageAttachment(data.getData());
+        }
     }
 
-    /** Picking a file only stages it; the user still writes the instruction before sending. */
+    /** Picking files only stages them; the user still writes the instruction before sending. */
     private void stageAttachment(Uri uri) {
         String name = "file";
         long size = -1;
@@ -765,9 +803,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             // Keep the defaults.
         }
 
-        pendingUri = uri;
-        pendingName = name;
-        pendingSize = size;
+        pendingFiles.add(new PendingFile(uri, name == null ? "file" : name, size));
         renderPending();
         if (composer != null) {
             composer.requestFocus();
@@ -775,9 +811,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     }
 
     private void clearPending() {
-        pendingUri = null;
-        pendingName = null;
-        pendingSize = -1;
+        pendingFiles.clear();
         renderPending();
     }
 
@@ -785,12 +819,29 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         if (pendingRow == null || pendingLabel == null) {
             return;
         }
-        if (pendingUri == null) {
+        if (pendingFiles.isEmpty()) {
             pendingRow.setVisibility(View.GONE);
             return;
         }
-        pendingLabel.setText("待发送：" + pendingName
-                + (pendingSize > 0 ? "（" + formatSize(pendingSize) + "）" : ""));
+
+        if (pendingFiles.size() == 1) {
+            PendingFile file = pendingFiles.get(0);
+            pendingLabel.setText("待发送：" + file.name
+                    + (file.size > 0 ? "（" + formatSize(file.size) + "）" : ""));
+        } else {
+            long total = 0;
+            StringBuilder names = new StringBuilder();
+            for (PendingFile file : pendingFiles) {
+                if (file.size > 0) {
+                    total += file.size;
+                }
+                if (names.length() > 0) {
+                    names.append("、");
+                }
+                names.append(file.name);
+            }
+            pendingLabel.setText(pendingFiles.size() + " 个文件（" + formatSize(total) + "）：" + names);
+        }
         pendingRow.setVisibility(View.VISIBLE);
     }
 
@@ -804,29 +855,52 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         return String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
+    /**
+     * Uploads every staged file as one message: each file is staged with its own receipt,
+     * then a single prompt binds them all together with the typed text.
+     */
     private void sendAttachment(String caption) {
-        if (api == null || sessionId == null || uploading || pendingUri == null) {
+        if (api == null || sessionId == null || uploading || pendingFiles.isEmpty()) {
             return;
         }
 
-        final Uri uri = pendingUri;
-        final String fileName = pendingName == null ? "file" : pendingName;
-        final long fileSize = pendingSize;
+        final List<PendingFile> files = new ArrayList<>(pendingFiles);
         final String target = sessionId;
 
         uploading = true;
-        attachButton.setEnabled(false);
-        attachButton.setAlpha(0.4f);
+        if (attachButton != null) {
+            attachButton.setEnabled(false);
+            attachButton.setAlpha(0.4f);
+        }
         if (chatStatus != null) {
-            chatStatus.setText("正在上传 " + fileName + "…");
+            chatStatus.setText(files.size() == 1
+                    ? "正在上传 " + files.get(0).name + "…"
+                    : "正在上传 " + files.size() + " 个文件…");
         }
 
         io.execute(() -> {
-            try (InputStream stream = getContentResolver().openInputStream(uri)) {
-                if (stream == null) {
-                    throw new Exception("无法读取所选文件");
+            try {
+                JSONArray receipts = new JSONArray();
+                for (int index = 0; index < files.size(); index++) {
+                    PendingFile file = files.get(index);
+                    if (chatStatus != null && files.size() > 1) {
+                        final int current = index + 1;
+                        main.post(() -> chatStatus.setText("正在上传 " + current + "/" + files.size() + "…"));
+                    }
+                    try (InputStream stream = getContentResolver().openInputStream(file.uri)) {
+                        if (stream == null) {
+                            throw new Exception("无法读取 " + file.name);
+                        }
+                        JSONObject staged = api.upload(target, file.name, stream, file.size, "", false);
+                        String receiptId = staged.optString("receiptId", "");
+                        if (receiptId.isEmpty()) {
+                            throw new Exception("服务端没有返回回执");
+                        }
+                        receipts.put(receiptId);
+                    }
                 }
-                api.upload(target, fileName, stream, fileSize, caption);
+
+                api.sendBatch(target, caption, receipts);
                 main.post(() -> {
                     uploading = false;
                     if (attachButton != null) {
@@ -838,7 +912,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     }
                     clearPending();
                     if (chatStatus != null) {
-                        chatStatus.setText("已发送 " + fileName);
+                        chatStatus.setText(files.size() == 1
+                                ? "已发送 " + files.get(0).name
+                                : "已发送 " + files.size() + " 个文件");
                     }
                 });
             } catch (Exception exception) {
