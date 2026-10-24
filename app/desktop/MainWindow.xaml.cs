@@ -49,6 +49,9 @@ public sealed partial class MainWindow : Window
         SessionList.ItemsSource = _groupsView.View;
         MessageList.ItemsSource = _messages;
         ServerLabel.Text = _settings.ServerUrl;
+        RefreshLanLabel();
+        // The LAN address can change while the window is open (new DHCP lease).
+        Activated += (_, _) => RefreshLanLabel();
         _countdownTimer.Tick += (_, _) => TickCountdowns();
         _countdownTimer.Start();
 
@@ -180,6 +183,53 @@ public sealed partial class MainWindow : Window
     }
 
     // ---------- 连接 ----------
+
+    private const int ServicePort = 7317;
+
+    private static string LanBaseUrlOrHint()
+    {
+        var url = NetworkInfo.LanBaseUrl(ServicePort);
+        return string.IsNullOrEmpty(url) ? "未检测到局域网地址" : url;
+    }
+
+    private static bool CopyToClipboard(string text)
+    {
+        try
+        {
+            var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            package.SetText(text);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(package);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Shows the address the phone has to use; it follows DHCP changes.</summary>
+    private void RefreshLanLabel()
+    {
+        if (LanLabel is null)
+        {
+            return;
+        }
+        var url = NetworkInfo.LanBaseUrl(ServicePort);
+        LanLabel.Text = string.IsNullOrEmpty(url) ? "未检测到局域网地址" : $"手机访问：{url}";
+    }
+
+    private void OnCopyLanClick(object sender, RoutedEventArgs e)
+    {
+        var url = NetworkInfo.LanBaseUrl(ServicePort);
+        if (string.IsNullOrEmpty(url) || !CopyToClipboard(url))
+        {
+            return;
+        }
+
+        CopyLanButton.Content = "已复制";
+        _ = Task.Delay(1500).ContinueWith(_ => DispatcherQueue.TryEnqueue(
+            () => CopyLanButton.Content = "复制"));
+    }
 
     private void ShowOffline(bool show, string? message = null)
     {
@@ -875,7 +925,36 @@ public sealed partial class MainWindow : Window
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         actions.Children.Add(regenerate);
 
+        // The address is what the phone has to type, so it is shown and copyable here.
+        var addressText = new TextBlock
+        {
+            Text = LanBaseUrlOrHint(),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 15,
+            IsTextSelectionEnabled = true,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var copyAddress = new Button { Content = "复制地址" };
+        copyAddress.Click += (_, _) =>
+        {
+            if (CopyToClipboard(LanBaseUrlOrHint()))
+            {
+                copyAddress.Content = "已复制";
+            }
+        };
+        var addressRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        addressRow.Children.Add(copyAddress);
+
         var stack = new StackPanel { Spacing = 10, Width = 440 };
+        stack.Children.Add(new TextBlock
+        {
+            Text = "手机端服务地址",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+        });
+        stack.Children.Add(addressText);
+        stack.Children.Add(addressRow);
+        stack.Children.Add(new TextBlock { Text = "配对码", Margin = new Thickness(0, 8, 0, 0) });
         stack.Children.Add(codeBlock);
         stack.Children.Add(countdown);
         stack.Children.Add(actions);

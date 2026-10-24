@@ -146,10 +146,23 @@
                 </ListView>
 
                 <StackPanel Grid.Row="2" Padding="16,12" Spacing="6">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock
+                            x:Name="LanLabel"
+                            VerticalAlignment="Center"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            IsTextSelectionEnabled="True" />
+                        <Button
+                            x:Name="CopyLanButton"
+                            Content="复制"
+                            Padding="8,2"
+                            Click="OnCopyLanClick" />
+                    </StackPanel>
                     <TextBlock
                         x:Name="ServerLabel"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Content="配对码" Click="OnPairingInfoClick" />
                         <Button Content="远程访问" Click="OnRemoteClick" />
