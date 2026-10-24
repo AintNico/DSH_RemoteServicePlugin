@@ -13,11 +13,16 @@ public final class Prefs {
     }
 
     public String server() {
-        return prefs.getString("server", "http://192.168.33.191:7317");
+        return prefs.getString("server", "");
     }
 
     public String token() {
         return prefs.getString("token", "");
+    }
+
+    /** Keeps the token; only the host moved (new DHCP lease, router restart). */
+    public void setServer(String server) {
+        prefs.edit().putString("server", server).apply();
     }
 
     public void save(String server, String token) {

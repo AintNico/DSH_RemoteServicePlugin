@@ -120,7 +120,7 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         LiveLink.get().addListener(this);
         requestNotificationPermission();
 
-        if (prefs.token().isEmpty()) {
+        if (prefs.token().isEmpty() || prefs.server().isEmpty()) {
             showPairing();
         } else {
             connect();
@@ -247,9 +247,36 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         Button pair = button("配对", ACCENT, Color.WHITE);
         root.addView(pair, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)));
 
+        root.addView(space(10));
+        Button discover = button("自动发现电脑", PANEL, ACCENT);
+        root.addView(discover, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44)));
+
         TextView error = label("", 13, DANGER, false);
         root.addView(space(10));
         root.addView(error);
+
+        discover.setOnClickListener(v -> {
+            discover.setEnabled(false);
+            discover.setAlpha(0.5f);
+            discover.setText("正在扫描同一网络…");
+            error.setText("");
+            io.execute(() -> {
+                List<String> found = Discovery.scan(7317, 3);
+                main.post(() -> {
+                    discover.setEnabled(true);
+                    discover.setAlpha(1f);
+                    discover.setText("自动发现电脑");
+                    if (found.isEmpty()) {
+                        error.setText("没找到运行插件的电脑：确认手机和电脑连的是同一个 Wi-Fi");
+                        return;
+                    }
+                    server.setText(found.get(0));
+                    error.setText(found.size() > 1
+                            ? "找到 " + found.size() + " 台，已填入第一台：" + found.get(0)
+                            : "已找到 " + found.get(0));
+                });
+            });
+        });
 
         pair.setOnClickListener(v -> {
             String serverUrl = server.getText().toString().trim();
@@ -403,13 +430,71 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     if (sessionStatus != null) {
                         sessionStatus.setText(friendly(exception));
                     }
+                    // A moved host (new DHCP lease) is the common failure: look for it again
+                    // instead of making the user retype an IP.
+                    if (isNetworkFailure(exception)) {
+                        maybeRediscover();
+                    }
                 });
             }
         });
     }
 
-    private String describeList(int count, int groups) {
-        if (count == 0 && groups == 0) {
+    private boolean rediscovering;
+
+    private static boolean isNetworkFailure(Throwable error) {
+        Throwable cause = error;
+        while (cause != null) {
+            if (cause instanceof java.io.IOException) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * The saved host stopped answering, usually because the router handed the PC a new
+     * address. The device token outlives the address, so finding the new host is enough.
+     */
+    private void maybeRediscover() {
+        if (rediscovering || prefs.token().isEmpty()) {
+            return;
+        }
+        rediscovering = true;
+        final String previous = prefs.server();
+        if (sessionStatus != null) {
+            sessionStatus.setText("连接不上，正在同一网络里搜索电脑…");
+        }
+        io.execute(() -> {
+            List<String> found = Discovery.scan(7317, 3);
+            main.post(() -> {
+                rediscovering = false;
+                if (found.isEmpty()) {
+                    if (sessionStatus != null) {
+                        sessionStatus.setText("没找到运行插件的电脑：确认手机和电脑连的是同一个 Wi-Fi");
+                    }
+                    return;
+                }
+                String best = found.get(0);
+                if (best.equals(previous)) {
+                    if (sessionStatus != null) {
+                        sessionStatus.setText("找到了 " + best + "，但仍然连不上");
+                    }
+                    return;
+                }
+                prefs.setServer(best);
+                api = new Api(best, prefs.token());
+                LiveLink.get().restart(MainActivity.this);
+                if (sessionStatus != null) {
+                    sessionStatus.setText("已自动切换到 " + best);
+                }
+                loadSessions();
+            });
+        });
+    }
+
+    private String describeList(int count, int groups) {        if (count == 0 && groups == 0) {
             return "还没有会话";
         }
         return groups + " 个工作区 · " + count + " 个会话";
