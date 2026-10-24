@@ -1,68 +1,90 @@
-# DSH_RemoteServicePlugin
+# DSH Remote — 用手机远程控制 DSH
 
-Control your DSH remotely using your smartphone.
+把 DSH 装进手机：看会话、收发消息、审批工具调用、双向传文件。
 
-## Status
+本仓库包含三部分，互相配合但不能单独使用：
 
-- [x] P0 — 插件骨架、独立监听、配对鉴权、会话列表
-- [x] P0.5 — 桌面端 WinUI 3 独立窗口（配对 + 会话列表）
-- [x] P1 — 消息历史、实时推送、发送与停止（流式增量待补）
-- [x] P2 — 审批推送与回传（策略开关、重试、超时回退、撤销）
-- [x] P3 — 文件双向（附件上传、工作区浏览、签名下载）
-- [ ] P3.5 — AI 主动推送文件（`send_file_to_phone` 工具 + 变更集准入）
-- [x] P4 — 安卓原生应用初版（配对、会话、消息、审批）
-- [ ] P4.5 — 安卓通知、前台服务、悬浮球、文件收发
-- [ ] P5 — 外网访问
+| 部分 | 位置 | 说明 |
+|---|---|---|
+| **插件** | 仓库根目录 | 跑在电脑的 DSH 里，监听 `7317`，是唯一的服务端 |
+| **桌面端** | `app/desktop` | WinUI 3 原生窗口，和插件同机，免配对 |
+| **手机端** | `app/android` | 安卓原生应用（Java），扫码/输码配对后远程控制 |
 
-设计方案见 [docs/DESIGN.md](docs/DESIGN.md)。
+## 功能
 
-## 组成
+- **会话**：按工作区分组，和 DSH 侧边栏一致，运行状态实时刷新
+- **消息**：完整历史 + SSE 实时推送 + 流式增量渲染（Markdown、代码块）
+- **审批**：工具调用推送到手机，可远程允许/拒绝，超时回退到电脑
+- **文件双向**
+  - 手机 → 电脑：多选上传、从微信/QQ 分享进来，多文件合并成一条消息
+  - 电脑 → 手机：工作区浏览、多选下载、一键保存或分享到其他应用
+- **远程访问**：桌面端一键 SSH 隧道，出网即可用，HTTPS + 令牌双保险
+- **自动发现**：电脑换了 IP，手机自动扫描局域网找回，不用手动改地址
+- **托盘常驻**：桌面端关窗即隐藏到托盘，后台继续推审批
 
-| 目录 | 内容 |
-|---|---|
-| 根目录 | DSH 插件（Node，HTTP/WebSocket 后端） |
-| `app/desktop` | 桌面客户端（WinUI 3 / .NET 8 原生窗口） |
-| `web/` | 调试用的网页版界面，正式客户端不使用 |
+## 快速开始
 
-## 开发
+### 1. 电脑：装插件
 
-```bash
-# 插件语法与模块加载检查
-node --input-type=module -e "await import('./index.js')"
-
-# 桌面客户端
-dotnet build app/desktop/DshRemote.csproj -c Debug -p:Platform=x64
-
-# 桌面客户端（自包含发布，约 166 MB，可脱离 .NET 运行时运行）
-npm run publish:desktop
+```powershell
+git clone https://github.com/AintNico/DSH_RemoteServicePlugin.git
 ```
 
-安装到当前 profile：用 DSH 的 `plugin_manager` → `install_bundle`，目标指向本目录。
+在 DSH 里用 `plugin_manager` → `install_bundle`，目标填克隆下来的**目录绝对路径**。
+插件启用后会监听 `http://0.0.0.0:7317`，并自动把桌面端窗口拉起来。
 
-## 桌面端随插件自动启动
+> 桌面端首次启动会用本机 .NET SDK 自动构建；也可以先跑 `npm run publish:desktop` 生成免运行时版本。
 
-插件启用后会自己把桌面窗口拉起来，不需要单独启动：
+### 2. 电脑：装桌面端（可选）
 
-- 优先使用 `app/desktop/dist/DshRemote.exe`（自包含发布版）
-- 其次使用 `app/desktop/bin/x64/<Config>/net8.0-windows10.0.19041.0/DshRemote.exe`（开发构建）
-- 都没有时，用本机 .NET SDK 自动构建一次（需要 .NET 8 SDK）
-- 已经有窗口在运行时不会重复打开
-- 首次启动会在桌面和开始菜单创建「DSH 远程」快捷方式
+插件会自动构建并启动。想手动装，从 [Releases](../../releases) 下载 `DSH-Remote-<版本>-desktop-win-x64.zip`，解压后双击 `DshRemote.exe` 即可，**不需要装 .NET 运行时**（自包含发布）。
 
-配置项（`cordis.patch.yml` 或 profile 配置）：
+### 3. 手机：装 APK 并配对
+
+从 [Releases](../../releases) 下载 `DSH-Remote-<版本>-android.apk` 安装。
+
+打开 App → 点「自动发现电脑」或手填地址 → 输入 6 位配对码（桌面端窗口左下角「配对码」）→ 完成。
+
+详细步骤和排错见 [docs/INSTALL.md](docs/INSTALL.md)。
+
+## 系统要求
+
+| 部分 | 要求 |
+|---|---|
+| 插件 | DSH（含 `sessionController` / `sessionQuery` / `workspaceRegistry` 服务），Node 20+ |
+| 桌面端 | Windows 10 1809+ / Windows 11；自包含版无需 .NET；从源码构建需要 .NET 8 SDK |
+| 手机端 | Android 8.0 (API 26) 及以上，和电脑在同一个局域网 |
+
+## 配置
+
+插件配置写在 `cordis.patch.yml` 或 profile 配置里：
 
 ```yaml
+port: 7317                 # 监听端口
+host: 0.0.0.0              # 监听地址
+pairingTtlMs: 300000       # 配对码有效期
 desktop:
-  autoLaunch: true   # 关掉可禁止随插件启动
-  shortcuts: true    # 是否创建快捷方式
-  exe: null          # 指定自定义路径时优先使用
+  autoLaunch: true         # 启用插件时自动开桌面端窗口
+  shortcuts: true          # 首次启动创建快捷方式
+  exe: null                # 指定自定义桌面端路径
 ```
 
-## 使用
+## 安全
 
-1. 插件启动后监听 `http://0.0.0.0:7317`。
-2. **桌面端不需要配对**：它和插件在同一台电脑上，直接连本机端口。
-3. 手机端在配对页输入配对码完成绑定；配对码在桌面端窗口左下角「配对码」里查看，可在同一弹窗里吊销设备。
-4. 绑定后手机可查看会话、收发消息、处理审批、收发文件。
+- **局域网内通信**，默认不暴露公网；远程访问需在桌面端手动开隧道
+- **设备令牌**：手机配对后拿到 32 字节随机令牌，服务端只存 SHA-256
+- **本机免令牌有前提**：只有源地址是回环、且没有转发头、Host 也是本机时才放行；通过隧道进来的请求一律要求令牌
+- **配对码**：6 位、5 分钟有效、每 IP 每分钟最多 5 次尝试
+- 下载链接一次性签名，5 分钟过期
 
-配对码 5 分钟有效，令牌保存在 `.dsh/profiles/<profile>/remote-service/state.json`（仅存哈希）。
+## 文档
+
+- [安装与排错](docs/INSTALL.md)
+- [设计方案](docs/DESIGN.md)
+- [发布流程](docs/RELEASE.md)
+
+## 已知限制
+
+- 只能连局域网（或自己开隧道），没有中转服务器
+- QQ/微信的聊天文件存在私有目录，第三方应用读不到，需要用「分享 / 用其他应用打开」递进来
+- 桌面端和插件必须同机（桌面端通过 `127.0.0.1` 免配对直连）

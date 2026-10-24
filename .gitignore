@@ -12,3 +12,5 @@ app/android/.gradle/
 app/android/build/
 app/android/app/build/
 app/android/local.properties
+# Release artifacts built by scripts/package-release.ps1
+release/
