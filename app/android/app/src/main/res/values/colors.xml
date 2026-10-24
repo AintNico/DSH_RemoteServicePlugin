@@ -10,4 +10,5 @@
     <color name="white">#FFFFFFFF</color>
     <color name="approval_card">#FFFFF4E5</color>
     <color name="dot_idle">#FFC4C8CE</color>
+    <color name="icon_background">#FFFFFFFF</color>
 </resources>
