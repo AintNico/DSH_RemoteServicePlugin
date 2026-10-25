@@ -999,7 +999,7 @@ public sealed partial class MainWindow : Window
                     info.Children.Add(new TextBlock { Text = device.Name });
                     info.Children.Add(new TextBlock
                     {
-                        Text = "配对于 " + DateTimeOffset.FromUnixTimeMilliseconds(device.CreatedAt).ToLocalTime().ToString("MM-dd HH:mm"),
+                        Text = "最后活跃 " + FormatSeen(device.LastSeenAt) + " · 授权剩余 " + FormatRemaining(device.ExpiresAt),
                         FontSize = 12,
                         Opacity = 0.6,
                     });
@@ -1198,5 +1198,30 @@ public sealed partial class MainWindow : Window
         if (delta.TotalHours < 1) return $"{(int)delta.TotalMinutes} 分钟前";
         if (delta.TotalDays < 1) return $"{(int)delta.TotalHours} 小时前";
         return time.ToString("M月d日");
+    }
+
+    private static string FormatSeen(long timestamp)
+    {
+        return timestamp <= 0 ? "未知" : FormatWhen(timestamp);
+    }
+
+    /// <summary>How long the token in this row still works without re-pairing.</summary>
+    private static string FormatRemaining(long expiresAt)
+    {
+        if (expiresAt <= 0)
+        {
+            return "未知";
+        }
+        var left = expiresAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (left <= 0)
+        {
+            return "已过期";
+        }
+        var span = TimeSpan.FromMilliseconds(left);
+        if (span.TotalHours >= 1)
+        {
+            return $"{(int)span.TotalHours} 小时 {span.Minutes} 分";
+        }
+        return $"{Math.Max(1, span.Minutes)} 分钟";
     }
 }

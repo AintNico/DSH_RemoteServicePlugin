@@ -24,6 +24,9 @@ public sealed class DeviceDto
 
     [JsonPropertyName("lastSeenAt")]
     public long LastSeenAt { get; set; }
+
+    [JsonPropertyName("expiresAt")]
+    public long ExpiresAt { get; set; }
 }
 
 public sealed class PairingResponseDto

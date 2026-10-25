@@ -108,15 +108,23 @@ public final class Api {
         }
     }
 
-    public static JSONObject pair(String server, String code, String device) throws IOException {
+    public static JSONObject pair(String server, String code, String device, String deviceId)
+            throws IOException {
         try {
             JSONObject body = new JSONObject();
             body.put("code", code);
             body.put("deviceName", device);
+            if (deviceId != null && !deviceId.isEmpty()) {
+                body.put("deviceId", deviceId);
+            }
             return new Api(server, null).request("/api/pair", "POST", body);
         } catch (JSONException error) {
             throw new IOException(error);
         }
+    }
+
+    public static JSONObject pair(String server, String code, String device) throws IOException {
+        return pair(server, code, device, null);
     }
 
     public JSONArray sessions() throws IOException {
@@ -265,19 +273,32 @@ public final class Api {
         }
     }
 
-    /** Blocking SSE loop; call from a background thread. Reconnects until interrupted. */
-    public void streamEvents(Runnable onOpen, FrameListener listener) {
+    /**
+     * Blocking SSE loop; call from a background thread. Reconnects until interrupted, with
+     * exponential backoff so a dead host is not hammered, and reports both edges of the
+     * connection so the UI can show 已连接 / 重连中.
+     */
+    public void streamEvents(Runnable onOpen, Runnable onClosed, FrameListener listener) {
+        int attempt = 0;
         while (!Thread.currentThread().isInterrupted()) {
             HttpURLConnection connection = null;
+            boolean opened = false;
             try {
                 connection = open("/api/events", "GET");
                 // The server pings every 20s; a stalled read means the link is half-open.
                 connection.setReadTimeout(45000);
-                if (connection.getResponseCode() != 200) {
-                    Thread.sleep(3000);
+                int status = connection.getResponseCode();
+                if (status != 200) {
+                    // 401 means the token expired: back off long enough to stop retrying hot.
+                    attempt = status == 401 ? Math.max(attempt, 4) : attempt + 1;
+                    sleepBeforeRetry(attempt);
                     continue;
                 }
+
+                opened = true;
+                attempt = 0;
                 onOpen.run();
+
                 BufferedReader reader = new BufferedReader(
                         new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8));
                 String line;
@@ -292,18 +313,29 @@ public final class Api {
                     }
                 }
             } catch (IOException error) {
-                try {
-                    Thread.sleep(3000);
-                } catch (InterruptedException interrupted) {
-                    return;
-                }
+                attempt += 1;
             } catch (InterruptedException interrupted) {
                 return;
             } finally {
                 if (connection != null) {
                     connection.disconnect();
                 }
+                if (opened) {
+                    onClosed.run();
+                }
+            }
+
+            try {
+                sleepBeforeRetry(attempt);
+            } catch (InterruptedException interrupted) {
+                return;
             }
         }
+    }
+
+    /** 1s, 2s, 4s … capped at 30s, with jitter so two devices do not retry in lockstep. */
+    private static void sleepBeforeRetry(int attempt) throws InterruptedException {
+        long delay = Math.min(30_000L, 1_000L << Math.min(attempt, 5));
+        Thread.sleep(delay + (long) (Math.random() * 400));
     }
 }

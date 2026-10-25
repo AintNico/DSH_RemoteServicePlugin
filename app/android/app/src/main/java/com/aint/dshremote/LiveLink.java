@@ -1,6 +1,10 @@
 package com.aint.dshremote;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
 import android.os.Handler;
 import android.os.Looper;
 
@@ -31,6 +35,8 @@ public final class LiveLink {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private Thread thread;
+    private Context appContext;
+    private ConnectivityManager.NetworkCallback networkCallback;
     private volatile boolean connected;
     private volatile boolean appVisible;
 
@@ -63,13 +69,25 @@ public final class LiveLink {
         if (prefs.token().isEmpty()) {
             return;
         }
-        Api api = new Api(prefs.server(), prefs.token());
+        appContext = context.getApplicationContext();
+        watchNetwork();
+        openLink(prefs.server(), prefs.token());
+    }
 
+    private void openLink(String server, String token) {
+        Api api = new Api(server, token);
         thread = new Thread(() -> api.streamEvents(
                 () -> main.post(() -> {
                     connected = true;
                     for (Listener listener : listeners) {
                         listener.onConnection(true);
+                    }
+                }),
+                // The stream dropped; Api retries on its own, this only updates the UI.
+                () -> main.post(() -> {
+                    connected = false;
+                    for (Listener listener : listeners) {
+                        listener.onConnection(false);
                     }
                 }),
                 frame -> main.post(() -> {
@@ -79,6 +97,47 @@ public final class LiveLink {
                 })));
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /**
+     * Reconnect immediately when Wi-Fi comes back instead of waiting for the backoff timer:
+     * the common case is a phone that dozed off or roamed between access points.
+     */
+    private void watchNetwork() {
+        if (networkCallback != null || appContext == null) {
+            return;
+        }
+        ConnectivityManager manager =
+                (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) {
+            return;
+        }
+
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                if (!connected) {
+                    restart(appContext);
+                }
+            }
+
+            @Override
+            public void onCapabilitiesChanged(Network network, NetworkCapabilities capabilities) {
+                if (!connected && capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    restart(appContext);
+                }
+            }
+        };
+
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build();
+        try {
+            manager.registerNetworkCallback(request, networkCallback);
+        } catch (Exception ignored) {
+            // Without the callback the backoff loop still reconnects, just slower.
+            networkCallback = null;
+        }
     }
 
     public synchronized void restart(Context context) {

@@ -315,7 +315,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             error.setText("");
             io.execute(() -> {
                 try {
-                    JSONObject result = Api.pair(targetServer, targetCode, deviceName.isEmpty() ? "Android" : deviceName);
+                    JSONObject result = Api.pair(targetServer, targetCode,
+                            deviceName.isEmpty() ? "Android" : deviceName, prefs.deviceId());
                     String token = result.optString("token", "");
                     if (token.isEmpty()) throw new Exception("服务端没有返回令牌");
                     prefs.save(targetServer, token);
@@ -435,6 +436,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                     // instead of making the user retype an IP.
                     if (isNetworkFailure(exception)) {
                         maybeRediscover();
+                    } else if (isUnauthorized(exception)) {
+                        // The token expired (24h of inactivity) or was revoked on the desktop.
+                        prefs.clear();
+                        LiveLink.get().stop();
+                        Toast.makeText(this, "授权已过期，请重新配对", Toast.LENGTH_LONG).show();
+                        showPairing();
                     }
                 });
             }
@@ -452,6 +459,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
             cause = cause.getCause();
         }
         return false;
+    }
+
+    private static boolean isUnauthorized(Throwable error) {
+        return error instanceof Api.ApiException
+                && ((Api.ApiException) error).code().equals("unauthorized");
     }
 
     /**
