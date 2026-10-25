@@ -339,8 +339,16 @@ public sealed partial class MainWindow : Window
             groups.Add(flat);
         }
 
+        // A workspace with a running session floats to the top; the rest keep registry order.
+        var ordered = groups
+            .Select((group, index) => new { group, index, running = group.Any(item => item.Running) })
+            .OrderByDescending(entry => entry.running)
+            .ThenBy(entry => entry.index)
+            .Select(entry => entry.group)
+            .ToList();
+
         _groups.Clear();
-        foreach (var group in groups)
+        foreach (var group in ordered)
         {
             _groups.Add(group);
         }
@@ -349,7 +357,7 @@ public sealed partial class MainWindow : Window
         EmptyState.Visibility = total == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (total > 0 && SessionList.SelectedItem is null)
         {
-            SessionList.SelectedItem = groups.SelectMany(group => group).First();
+            SessionList.SelectedItem = ordered.SelectMany(group => group).First();
         }
     }
 

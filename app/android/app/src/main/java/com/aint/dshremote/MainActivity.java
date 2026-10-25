@@ -373,18 +373,31 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         list.setAdapter(sessionAdapter);
         refreshButton.setOnClickListener(v -> loadSessions(true));
 
-        unpair.setOnClickListener(v -> {
-            prefs.clear();
-            LiveLink.get().stop();
-            stopService(new Intent(this, RemoteService.class));
-            api = null;
-            sessionRows.clear();
-            sessionAdapter.notifyDataSetChanged();
-            showPairing();
-        });
+        unpair.setOnClickListener(v -> confirmUnpair());
 
         setScreen(root);
         loadSessions();
+    }
+
+    /** Unpairing drops the token, so it asks first instead of taking one stray tap. */
+    private void confirmUnpair() {
+        new AlertDialog.Builder(this)
+                .setTitle("解除配对？")
+                .setMessage("解除后这台手机会删除本地令牌，必须重新输入配对码才能连回来。\n\n"
+                        + "只是想切换电脑的话，可以先用「自动发现电脑」。")
+                .setPositiveButton("解除配对", (dialog, which) -> {
+                    prefs.clear();
+                    LiveLink.get().stop();
+                    stopService(new Intent(this, RemoteService.class));
+                    api = null;
+                    sessionRows.clear();
+                    if (sessionAdapter != null) {
+                        sessionAdapter.notifyDataSetChanged();
+                    }
+                    showPairing();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void loadSessions() {
@@ -544,41 +557,75 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }, remaining);
     }
 
+    /**
+     * Builds the grouped list with running work first: a workspace that currently has a
+     * running session floats above the idle ones, and the rest keep their original order.
+     */
     private List<ListRow> buildSessionRows(JSONObject payload) {
         List<ListRow> rows = new ArrayList<>();
+
+        // Collect groups first so they can be ordered by activity.
+        List<Group> ordered = new ArrayList<>();
         JSONArray groups = payload.optJSONArray("workspaces");
         int groupCount = groups == null ? 0 : groups.length();
-
         for (int i = 0; i < groupCount; i++) {
             JSONObject group = groups.optJSONObject(i);
             if (group == null) {
                 continue;
             }
             JSONArray items = group.optJSONArray("sessions");
-            int count = items == null ? 0 : items.length();
-            rows.add(ListRow.section(
-                    group.optString("title", "工作区"),
-                    count + " 个会话 · " + shortenPath(group.optString("path", ""))));
-            for (int j = 0; j < count; j++) {
+            Group entry = new Group();
+            entry.title = group.optString("title", "工作区");
+            entry.detail = (items == null ? 0 : items.length()) + " 个会话 · "
+                    + shortenPath(group.optString("path", ""));
+            for (int j = 0; j < (items == null ? 0 : items.length()); j++) {
                 JSONObject session = items.optJSONObject(j);
                 if (session != null) {
-                    rows.add(ListRow.session(session));
+                    entry.sessions.add(session);
+                    if (session.optBoolean("running")) {
+                        entry.running = true;
+                    }
                 }
             }
+            ordered.add(entry);
         }
 
         JSONArray ungrouped = payload.optJSONArray("ungrouped");
-        int loose = ungrouped == null ? 0 : ungrouped.length();
-        if (loose > 0) {
-            rows.add(ListRow.section("未分组", loose + " 个会话"));
-            for (int j = 0; j < loose; j++) {
+        if (ungrouped != null && ungrouped.length() > 0) {
+            Group loose = new Group();
+            loose.title = "未分组";
+            loose.detail = ungrouped.length() + " 个会话";
+            for (int j = 0; j < ungrouped.length(); j++) {
                 JSONObject session = ungrouped.optJSONObject(j);
                 if (session != null) {
-                    rows.add(ListRow.session(session));
+                    loose.sessions.add(session);
+                    if (session.optBoolean("running")) {
+                        loose.running = true;
+                    }
                 }
+            }
+            ordered.add(loose);
+        }
+
+        // Stable sort: running groups first, everything else keeps its registry order.
+        List<Group> sorted = new ArrayList<>(ordered);
+        sorted.sort((a, b) -> Boolean.compare(b.running, a.running));
+
+        for (Group entry : sorted) {
+            rows.add(ListRow.section(entry.title, entry.detail));
+            for (JSONObject session : entry.sessions) {
+                rows.add(ListRow.session(session));
             }
         }
         return rows;
+    }
+
+    /** One workspace (or the ungrouped bucket) while the list is being assembled. */
+    private static final class Group {
+        String title;
+        String detail;
+        boolean running;
+        final List<JSONObject> sessions = new ArrayList<>();
     }
 
     private String shortenPath(String path) {
