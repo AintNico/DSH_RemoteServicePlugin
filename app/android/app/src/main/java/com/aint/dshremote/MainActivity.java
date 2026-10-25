@@ -96,6 +96,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private ChatAdapter chatAdapter;
     private SessionAdapter sessionAdapter;
     private ListView chatList;
+    private View approvalSection;
+    private TextView approvalHeader;
+    private ScrollView approvalScroll;
+    private boolean approvalExpanded = true;
+    /** Every approval still waiting, from any session, so none is dropped while off-screen. */
+    private final Map<String, JSONObject> liveApprovals = new java.util.LinkedHashMap<>();
     private LinearLayout approvalBox;
     private EditText composer;
     private TextView chatStatus;
@@ -615,6 +621,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         TextView titleView = root.findViewById(R.id.chat_title);
         chatStatus = root.findViewById(R.id.chat_status);
         chatList = root.findViewById(R.id.chat_list);
+        approvalSection = root.findViewById(R.id.approval_section);
+        approvalHeader = root.findViewById(R.id.approval_header);
+        approvalScroll = root.findViewById(R.id.approval_scroll);
         approvalBox = root.findViewById(R.id.approval_box);
         pendingRow = root.findViewById(R.id.pending_row);
         pendingLabel = root.findViewById(R.id.pending_label);
@@ -624,6 +633,14 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         Button send = root.findViewById(R.id.chat_send);
         Button files = root.findViewById(R.id.chat_files);
         Button stop = root.findViewById(R.id.chat_stop);
+
+        // The tray scrolls instead of growing without bound.
+        approvalScroll.getLayoutParams().height = (int) (getResources().getDisplayMetrics().heightPixels * 0.34f);
+        approvalScroll.setLayoutParams(approvalScroll.getLayoutParams());
+        approvalHeader.setOnClickListener(v -> {
+            approvalExpanded = !approvalExpanded;
+            updateApprovalTray();
+        });
 
         titleView.setText(sessionTitle == null ? "" : sessionTitle);
         chatStatus.setText(LiveLink.get().connected() ? "已连接" : "连接中…");
@@ -651,6 +668,11 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         setScreen(root);
         approvalViews.clear();
         approvalBox.removeAllViews();
+        // Approvals from other sessions keep waiting here until they are answered or expire.
+        for (JSONObject pending : new ArrayList<>(liveApprovals.values())) {
+            addApprovalCard(pending);
+        }
+        updateApprovalTray();
         if (sharedUri != null) {
             Uri uri = sharedUri;
             sharedUri = null;
@@ -1385,12 +1407,19 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 loadSessions();
             }
         } else if ("approval".equals(kind)) {
+            String approvalId = frame.optString("id");
+            if (!approvalId.isEmpty()) {
+                liveApprovals.put(approvalId, frame);
+            }
             addApprovalCard(frame);
         } else if ("approval-resolved".equals(kind)) {
-            View view = approvalViews.remove(frame.optString("id"));
+            String resolvedId = frame.optString("id");
+            liveApprovals.remove(resolvedId);
+            View view = approvalViews.remove(resolvedId);
             if (view != null && approvalBox != null) {
                 approvalBox.removeView(view);
             }
+            updateApprovalTray();
         }
     }
 
@@ -1476,11 +1505,18 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
     }
 
+    /**
+     * Renders one approval. Approvals from other sessions are kept too: they are answered
+     * through the same broker, so hiding them only made requests look lost.
+     */
     private void addApprovalCard(JSONObject approval) {
-        if (approvalBox == null || sessionId == null || !sessionId.equals(approval.optString("sessionId"))) {
+        if (approvalBox == null) {
             return;
         }
         String id = approval.optString("id");
+        if (id.isEmpty() || approvalViews.containsKey(id)) {
+            return;
+        }
 
         View card = getLayoutInflater().inflate(R.layout.item_approval, approvalBox, false);
         TextView title = card.findViewById(R.id.approval_title);
@@ -1488,7 +1524,13 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         Button allow = card.findViewById(R.id.approval_allow);
         Button deny = card.findViewById(R.id.approval_deny);
 
-        title.setText("待审批 · " + approval.optString("toolName", "工具调用"));
+        String tool = approval.optString("toolName", "工具调用");
+        String session = approval.optString("sessionId", "");
+        String label = sessionId != null && sessionId.equals(session)
+                ? "待审批 · " + tool
+                : "待审批 · " + tool + "（" + sessionNameOf(session) + "）";
+        title.setText(label);
+
         String reason = approval.optString("reason", "");
         reasonView.setText(reason);
         reasonView.setVisibility(reason.isEmpty() ? View.GONE : View.VISIBLE);
@@ -1502,6 +1544,34 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         approvalViews.put(id, card);
         approvalBox.addView(card, params);
+        updateApprovalTray();
+    }
+
+    /** Short label for a session id, using the cached workspace listing. */
+    private String sessionNameOf(String id) {
+        for (ListRow row : sessionRows) {
+            if (!row.section && row.session != null && id.equals(row.session.optString("id"))) {
+                return titleOf(row.session);
+            }
+        }
+        return id.isEmpty() ? "其它会话" : "其它会话";
+    }
+
+    /** Header shows how many are waiting; the list scrolls and can be folded away. */
+    private void updateApprovalTray() {
+        if (approvalSection == null || approvalHeader == null || approvalScroll == null) {
+            return;
+        }
+        int count = approvalViews.size();
+        if (count == 0) {
+            approvalSection.setVisibility(View.GONE);
+            approvalExpanded = true;
+            return;
+        }
+
+        approvalSection.setVisibility(View.VISIBLE);
+        approvalHeader.setText("待审批 " + count + " 项 " + (approvalExpanded ? "▾" : "▸"));
+        approvalScroll.setVisibility(approvalExpanded ? View.VISIBLE : View.GONE);
     }
 
     private void answer(String id, String outcome, View card) {
@@ -1512,10 +1582,13 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 main.post(() -> Toast.makeText(this, friendly(exception), Toast.LENGTH_SHORT).show());
             }
             main.post(() -> {
+                liveApprovals.remove(id);
+                updateApprovalTray();
                 approvalViews.remove(id);
                 if (approvalBox != null) {
                     approvalBox.removeView(card);
                 }
+                updateApprovalTray();
             });
         });
     }

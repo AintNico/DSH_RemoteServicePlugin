@@ -17,7 +17,7 @@ public class RemoteService extends Service {
     public static final String CHANNEL_ALERTS = "dsh_alerts";
 
     private static final int STATUS_ID = 1;
-    private static final int APPROVAL_ID = 2;
+    private static final int APPROVAL_BASE_ID = 1000;
     private static final int MESSAGE_ID = 3;
 
     private final LiveLink.Listener listener = new LiveLink.Listener() {
@@ -25,8 +25,16 @@ public class RemoteService extends Service {
         public void onFrame(JSONObject frame) {
             String kind = frame.optString("kind");
             if ("approval".equals(kind)) {
-                notifyAlert(APPROVAL_ID, "待审批：" + frame.optString("toolName", "工具调用"),
+                // One notification per request: a shared id let later approvals overwrite
+                // earlier ones, which looked like approvals were being dropped.
+                notifyAlert(approvalNotificationId(frame.optString("id", "")),
+                        "待审批：" + frame.optString("toolName", "工具调用"),
                         frame.optString("reason", "点开处理"));
+            } else if ("approval-resolved".equals(kind)) {
+                NotificationManager manager = getSystemService(NotificationManager.class);
+                if (manager != null) {
+                    manager.cancel(approvalNotificationId(frame.optString("id", "")));
+                }
             } else if ("message".equals(kind)
                     && "assistant".equals(frame.optString("role"))
                     && !LiveLink.get().appVisible()) {
@@ -45,6 +53,10 @@ public class RemoteService extends Service {
             }
         }
     };
+
+    private static int approvalNotificationId(String approvalId) {
+        return APPROVAL_BASE_ID + Math.abs(approvalId.hashCode() % 1000);
+    }
 
     @Override
     public void onCreate() {
