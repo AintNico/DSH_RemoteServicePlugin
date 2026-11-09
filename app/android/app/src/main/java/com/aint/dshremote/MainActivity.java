@@ -40,6 +40,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
@@ -102,6 +103,9 @@ public class MainActivity extends Activity implements LiveLink.Listener {
     private boolean approvalExpanded = true;
     /** Every approval still waiting, from any session, so none is dropped while off-screen. */
     private final Map<String, JSONObject> liveApprovals = new java.util.LinkedHashMap<>();
+    /** Questions the agent is waiting on; the same tray renders them next to approvals. */
+    private final Map<String, JSONObject> liveQuestions = new java.util.LinkedHashMap<>();
+    private final Map<String, View> questionViews = new HashMap<>();
     private LinearLayout approvalBox;
     private EditText composer;
     private TextView chatStatus;
@@ -658,7 +662,15 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
     }
 
+    /**
+     * The server folds a title from the session log (the task name DSH itself shows); the
+     * folder name is only a fallback for sessions that have no title yet.
+     */
     private String titleOf(JSONObject session) {
+        String title = session.optString("title", "");
+        if (!title.isEmpty()) {
+            return title;
+        }
         String cwd = session.optString("cwd", "");
         if (cwd.isEmpty()) {
             return session.optString("id");
@@ -726,10 +738,14 @@ public class MainActivity extends Activity implements LiveLink.Listener {
 
         setScreen(root);
         approvalViews.clear();
+        questionViews.clear();
         approvalBox.removeAllViews();
-        // Approvals from other sessions keep waiting here until they are answered or expire.
+        // Approvals and questions from other sessions keep waiting here until answered.
         for (JSONObject pending : new ArrayList<>(liveApprovals.values())) {
             addApprovalCard(pending);
+        }
+        for (JSONObject pending : new ArrayList<>(liveQuestions.values())) {
+            addQuestionCard(pending);
         }
         updateApprovalTray();
         if (sharedUri != null) {
@@ -1479,6 +1495,25 @@ public class MainActivity extends Activity implements LiveLink.Listener {
                 approvalBox.removeView(view);
             }
             updateApprovalTray();
+        } else if ("question".equals(kind)) {
+            String questionId = frame.optString("id");
+            if (!questionId.isEmpty()) {
+                liveQuestions.put(questionId, frame);
+            }
+            addQuestionCard(frame);
+        } else if ("question-resolved".equals(kind)) {
+            String questionId = frame.optString("id");
+            liveQuestions.remove(questionId);
+            View view = questionViews.remove(questionId);
+            if (view != null && approvalBox != null) {
+                approvalBox.removeView(view);
+            }
+            updateApprovalTray();
+        } else if ("sessions-changed".equals(kind)) {
+            // The agent created, removed or started/stopped a session; re-read the list.
+            if (sessionsVisible) {
+                loadSessions();
+            }
         }
     }
 
@@ -1606,6 +1641,182 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         updateApprovalTray();
     }
 
+    /**
+     * Renders one parked `user-questions/request`. Each question offers its own options; the
+     * card is answered either by tapping a single option (one question, single choice) or by
+     * using 提交, which also carries a hand-written answer.
+     */
+    private void addQuestionCard(JSONObject question) {
+        if (approvalBox == null) {
+            return;
+        }
+        String id = question.optString("id");
+        if (id.isEmpty() || questionViews.containsKey(id)) {
+            return;
+        }
+
+        JSONArray items = question.optJSONArray("questions");
+        if (items == null || items.length() == 0) {
+            return;
+        }
+
+        View card = getLayoutInflater().inflate(R.layout.item_question, approvalBox, false);
+        TextView title = card.findViewById(R.id.question_title);
+        LinearLayout optionsBox = card.findViewById(R.id.question_options);
+        Button submit = card.findViewById(R.id.question_submit);
+
+        String session = question.optString("sessionId", "");
+        boolean current = sessionId != null && sessionId.equals(session);
+        title.setText(current ? "需要你决定" : "需要你决定（" + sessionNameOf(session) + "）");
+
+        // One map per question keeps the selection state without extra view lookups.
+        Map<String, java.util.LinkedHashSet<String>> selected = new HashMap<>();
+        Map<String, EditText> customFields = new HashMap<>();
+        boolean singleQuickAnswer = items.length() == 1;
+
+        for (int i = 0; i < items.length(); i++) {
+            JSONObject item = items.optJSONObject(i);
+            if (item == null) {
+                continue;
+            }
+            String qid = item.optString("id", String.valueOf(i));
+            selected.put(qid, new java.util.LinkedHashSet<>());
+
+            TextView label = new TextView(this);
+            label.setText(item.optString("question", "请选择"));
+            label.setTextSize(13);
+            label.setTextColor(getColor(R.color.text));
+            label.setPadding(0, dp(4), 0, dp(4));
+            optionsBox.addView(label);
+
+            String detail = item.optString("detail", "");
+            if (!detail.isEmpty()) {
+                TextView detailView = new TextView(this);
+                detailView.setText(detail);
+                detailView.setTextSize(12);
+                detailView.setTextColor(getColor(R.color.muted));
+                detailView.setPadding(0, 0, 0, dp(4));
+                optionsBox.addView(detailView);
+            }
+
+            JSONArray options = item.optJSONArray("options");
+            boolean multi = item.optBoolean("multiSelect");
+            int count = options == null ? 0 : options.length();
+            for (int j = 0; j < count; j++) {
+                JSONObject option = options.optJSONObject(j);
+                if (option == null) {
+                    continue;
+                }
+                String optionLabel = option.optString("label", "");
+                if (optionLabel.isEmpty()) {
+                    continue;
+                }
+
+                Button button = new Button(this, null, 0, R.style.Widget_Btn);
+                button.setText(optionLabel);
+                button.setAllCaps(false);
+                button.setTextSize(13);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(42));
+                params.bottomMargin = dp(6);
+                optionsBox.addView(button, params);
+
+                button.setOnClickListener(v -> {
+                    java.util.LinkedHashSet<String> bucket = selected.get(qid);
+                    if (bucket == null) {
+                        return;
+                    }
+                    if (!multi) {
+                        bucket.clear();
+                    }
+                    if (!bucket.remove(optionLabel)) {
+                        bucket.add(optionLabel);
+                    }
+                    button.setSelected(bucket.contains(optionLabel));
+                    button.setTextColor(getColor(
+                            bucket.contains(optionLabel) ? R.color.accent : R.color.text));
+
+                    // One question with a single choice: the tap itself is the answer.
+                    if (singleQuickAnswer && !multi && !bucket.isEmpty()) {
+                        submitQuestion(id, selected, customFields, card);
+                    }
+                });
+            }
+
+            EditText custom = new EditText(this);
+            custom.setHint("其它答案（可选）");
+            custom.setTextSize(13);
+            custom.setBackgroundResource(R.drawable.bg_input);
+            custom.setPadding(dp(10), dp(8), dp(10), dp(8));
+            LinearLayout.LayoutParams customParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            customParams.topMargin = dp(4);
+            customParams.bottomMargin = dp(4);
+            optionsBox.addView(custom, customParams);
+            customFields.put(qid, custom);
+        }
+
+        submit.setOnClickListener(v -> submitQuestion(id, selected, customFields, card));
+
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = dp(8);
+
+        questionViews.put(id, card);
+        approvalBox.addView(card, params);
+        updateApprovalTray();
+    }
+
+    /** Collects the current selections into the wire shape and posts them. */
+    private void submitQuestion(String id, Map<String, java.util.LinkedHashSet<String>> selected,
+                                Map<String, EditText> customFields, View card) {
+        try {
+            JSONArray answers = new JSONArray();
+            for (Map.Entry<String, java.util.LinkedHashSet<String>> entry : selected.entrySet()) {
+                JSONObject answer = new JSONObject();
+                answer.put("id", entry.getKey());
+                JSONArray picked = new JSONArray();
+                for (String label : entry.getValue()) {
+                    picked.put(label);
+                }
+                answer.put("selected", picked);
+                EditText custom = customFields.get(entry.getKey());
+                String text = custom == null ? "" : custom.getText().toString().trim();
+                if (!text.isEmpty()) {
+                    answer.put("custom", text);
+                }
+                if (picked.length() > 0 || !text.isEmpty()) {
+                    answers.put(answer);
+                }
+            }
+            if (answers.length() == 0) {
+                Toast.makeText(this, "请先选择或填写一个答案", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            answerQuestion(id, answers, card);
+        } catch (JSONException error) {
+            Toast.makeText(this, "答案格式有误", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void answerQuestion(String id, JSONArray answers, View card) {
+        io.execute(() -> {
+            try {
+                api.answerQuestion(id, answers);
+            } catch (Exception exception) {
+                main.post(() -> Toast.makeText(this, friendly(exception), Toast.LENGTH_SHORT).show());
+            }
+            main.post(() -> {
+                liveQuestions.remove(id);
+                questionViews.remove(id);
+                if (approvalBox != null) {
+                    approvalBox.removeView(card);
+                }
+                updateApprovalTray();
+            });
+        });
+    }
+
     /** Short label for a session id, using the cached workspace listing. */
     private String sessionNameOf(String id) {
         for (ListRow row : sessionRows) {
@@ -1616,12 +1827,12 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         return id.isEmpty() ? "其它会话" : "其它会话";
     }
 
-    /** Header shows how many are waiting; the list scrolls and can be folded away. */
+    /** Header shows how many items are waiting; the list scrolls and can be folded away. */
     private void updateApprovalTray() {
         if (approvalSection == null || approvalHeader == null || approvalScroll == null) {
             return;
         }
-        int count = approvalViews.size();
+        int count = approvalViews.size() + questionViews.size();
         if (count == 0) {
             approvalSection.setVisibility(View.GONE);
             approvalExpanded = true;

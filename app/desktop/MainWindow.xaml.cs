@@ -1189,6 +1189,10 @@ public sealed partial class MainWindow : Window
 
     private static string TitleOf(SessionDto session)
     {
+        if (!string.IsNullOrWhiteSpace(session.Title))
+        {
+            return session.Title!;
+        }
         var cwd = session.Cwd ?? string.Empty;
         var name = Path.GetFileName(cwd.TrimEnd('\\', '/'));
         return string.IsNullOrEmpty(name) ? session.Id : name;

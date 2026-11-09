@@ -21,6 +21,10 @@ public sealed class SessionDto
 
     [JsonPropertyName("origin")]
     public string? Origin { get; set; }
+
+    /// <summary>Task name folded from the session log; empty when the session has no title yet.</summary>
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
 }
 
 public sealed class SessionListDto

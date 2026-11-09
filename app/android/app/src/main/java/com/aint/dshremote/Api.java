@@ -161,6 +161,23 @@ public final class Api {
         request("/api/sessions/" + enc(sessionId) + "/cancel", "POST", null);
     }
 
+    /**
+     * Answers one parked user question. {@code answers} is the array the card collected,
+     * shaped like {@code [{ id, selected: [...], custom }]}.
+     */
+    public boolean answerQuestion(String questionId, JSONArray answers) throws IOException {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("answers", answers);
+            request("/api/questions/" + enc(questionId) + "/answer", "POST", body);
+            return true;
+        } catch (ApiException error) {
+            return error.status != 409;
+        } catch (JSONException error) {
+            throw new IOException(error);
+        }
+    }
+
     /** Streams one file as an attachment prompt. Returns the server's JSON receipt. */
     /**
      * Stages one file. With {@code withPrompt=false} the server keeps the upload and only
