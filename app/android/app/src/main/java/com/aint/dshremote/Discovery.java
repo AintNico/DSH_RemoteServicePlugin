@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * plugin's port, verified with a cheap HTTP probe, is fast enough (seconds) and works on
  * routers that block multicast. The result is a list of ready-to-use base URLs.
  */
-final class Discovery {
+public final class Discovery {
 
     private static final int PROBE_TIMEOUT_MS = 350;
     private static final int HTTP_TIMEOUT_MS = 900;
@@ -69,7 +69,7 @@ final class Discovery {
      * Sweeps each local /24 for hosts that answer like the plugin. Blocking; call it off the
      * main thread. Returns at most {@code maxResults} base URLs, fastest responses first.
      */
-    static List<String> scan(int port, int maxResults) {
+    public static List<String> scan(int port, int maxResults) {
         List<String> prefixes = localPrefixes();
         if (prefixes.isEmpty()) {
             return new ArrayList<>();

@@ -92,6 +92,22 @@ node --input-type=module -e "await import('./index.js')"
 npm run build:desktop
 ```
 
+### 安卓端代码结构
+
+三个页面各自一个文件，`MainActivity` 只做路由：
+
+| 文件 | 职责 |
+|---|---|
+| `MainActivity.java` | 生命周期、`LiveLink` 帧分发、分享意图、前台服务、页面切换、返回键 |
+| `ui/ScreenHost.java` | 页面访问宿主的接口（api/prefs/io/main/页面跳转） |
+| `ui/PairingScreen.java` | 连接页面：手动填地址、自动发现、配对 |
+| `ui/SessionsScreen.java` | 主页面：工作区分组、会话列表、刷新、解除配对 |
+| `ui/ChatScreen.java` | 会话页面：消息、流式输出、输入框、附件 |
+| `ui/PendingTray.java` | 审批与提问的可折叠托盘 |
+| `ui/WorkspaceBrowser.java` | 工作区文件浏览、多选下载/分享 |
+| `ui/PendingStore.java` | 跨页面存活的待处理审批/提问 |
+| `ui/UiKit.java` | dp、Toast、颜色、大小格式化等共用工具 |
+
 本地夹具（只在回环地址可用，用来在手机上把各种卡片点一遍）：
 
 ```powershell

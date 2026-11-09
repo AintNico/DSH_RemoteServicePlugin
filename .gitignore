@@ -14,3 +14,5 @@ app/android/app/build/
 app/android/local.properties
 # Release artifacts built by scripts/package-release.ps1
 release/
+# Android Studio / IntelliJ project state
+.idea/
