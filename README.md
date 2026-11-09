@@ -79,6 +79,35 @@ desktop:
 - **配对码**：6 位、5 分钟有效、每 IP 每分钟最多 5 次尝试；同一台设备重配不会产生新条目
 - 下载链接一次性签名，5 分钟过期
 
+## 开发
+
+```powershell
+# 单元测试（node:test，无第三方依赖）
+npm test
+
+# 插件语法与模块加载检查
+node --input-type=module -e "await import('./index.js')"
+
+# 桌面客户端
+npm run build:desktop
+```
+
+本地夹具（只在回环地址可用，用来在手机上把各种卡片点一遍）：
+
+```powershell
+# 普通选择题
+curl -X POST http://127.0.0.1:7317/api/dev/question-demo `
+  -H "Content-Type: application/json" -d "{\"sessionId\":\"<会话id>\"}"
+
+# 方案审批（plan-review：没有 options，按钮由 intent.approve 生成）
+curl -X POST http://127.0.0.1:7317/api/dev/question-demo `
+  -H "Content-Type: application/json" -d "{\"sessionId\":\"<会话id>\",\"intent\":\"plan-review\"}"
+
+# 工具授权卡片
+curl -X POST http://127.0.0.1:7317/api/dev/approval-demo `
+  -H "Content-Type: application/json" -d "{\"sessionId\":\"<会话id>\"}"
+```
+
 ## 文档
 
 - [安装与排错](docs/INSTALL.md)
