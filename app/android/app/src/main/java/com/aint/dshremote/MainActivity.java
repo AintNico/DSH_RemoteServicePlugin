@@ -1757,6 +1757,8 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
 
         submit.setOnClickListener(v -> submitQuestion(id, selected, customFields, card));
+        // Always available: even a single-choice question may be answered with free text.
+        submit.setVisibility(View.VISIBLE);
 
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -1840,8 +1842,18 @@ public class MainActivity extends Activity implements LiveLink.Listener {
         }
 
         approvalSection.setVisibility(View.VISIBLE);
-        approvalHeader.setText("待审批 " + count + " 项 " + (approvalExpanded ? "▾" : "▸"));
+        approvalHeader.setText("待处理 " + count + " 项 " + (approvalExpanded ? "▾" : "▸"));
         approvalScroll.setVisibility(approvalExpanded ? View.VISIBLE : View.GONE);
+
+        // Question cards carry options plus a submit button, so they need more room than a
+        // two-button approval card.
+        int heightPx = (int) (getResources().getDisplayMetrics().heightPixels
+                * (questionViews.isEmpty() ? 0.34f : 0.55f));
+        ViewGroup.LayoutParams params = approvalScroll.getLayoutParams();
+        if (params.height != heightPx) {
+            params.height = heightPx;
+            approvalScroll.setLayoutParams(params);
+        }
     }
 
     private void answer(String id, String outcome, View card) {
