@@ -26,6 +26,8 @@ public final class PairingScreen {
     private EditText deviceField;
     private Button pairButton;
     private TextView errorView;
+    /** Guards against a double tap / a duplicated deep-link intent racing each other. */
+    private boolean submitting;
 
     public PairingScreen(ScreenHost host, Runnable onPaired) {
         this.host = host;
@@ -80,10 +82,11 @@ public final class PairingScreen {
 
     /**
      * Called with a link from the camera, the in-app scanner, or an external intent. The
-     * fields are filled first so a failure leaves something the user can correct by hand.
+     * fields are filled first so a failure leaves something the user can correct by hand,
+     * and the form is locked while the pairing request is in flight.
      */
     public void applyLink(PairLink link) {
-        if (link == null) {
+        if (link == null || submitting) {
             return;
         }
         if (serverField == null || codeField == null || pairButton == null) {
@@ -91,6 +94,7 @@ public final class PairingScreen {
         }
         serverField.setText(link.url);
         codeField.setText(link.code);
+        errorView.setText("正在用二维码里的信息配对…");
         submit();
     }
 
@@ -103,7 +107,7 @@ public final class PairingScreen {
     }
 
     private void submit() {
-        if (pairButton == null) {
+        if (pairButton == null || submitting) {
             return;
         }
         String serverUrl = serverField.getText().toString().trim();
@@ -119,9 +123,9 @@ public final class PairingScreen {
 
         final String targetServer = serverUrl;
         final String targetCode = pairingCode;
+        submitting = true;
         pairButton.setEnabled(false);
         pairButton.setAlpha(0.5f);
-        errorView.setText("");
         host.io().execute(() -> {
             try {
                 JSONObject result = Api.pair(targetServer, targetCode,
@@ -129,9 +133,13 @@ public final class PairingScreen {
                 String token = result.optString("token", "");
                 if (token.isEmpty()) throw new Exception("服务端没有返回令牌");
                 host.prefs().save(targetServer, token);
-                host.main().post(onPaired);
+                host.main().post(() -> {
+                    errorView.setText("配对成功，正在连接…");
+                    onPaired.run();
+                });
             } catch (Exception exception) {
                 host.main().post(() -> {
+                    submitting = false;
                     pairButton.setEnabled(true);
                     pairButton.setAlpha(1f);
                     errorView.setText(host.friendly(exception));

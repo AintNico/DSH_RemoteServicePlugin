@@ -948,8 +948,12 @@ public sealed partial class MainWindow : Window
         };
 
         var regenerate = new Button { Content = "重新生成" };
+        var copyLink = new Button { Content = "复制链接" };
+        // Both live next to the code: the dialog is scrollable, but these must never be the
+        // part that scrolls out of sight.
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         actions.Children.Add(regenerate);
+        actions.Children.Add(copyLink);
 
         // The address is what the phone has to type, so it is shown and copyable here.
         var addressText = new TextBlock
@@ -984,8 +988,8 @@ public sealed partial class MainWindow : Window
         // The QR carries the same deep link the button copies, so scanning replaces typing.
         var qrImage = new Image
         {
-            Width = 232,
-            Height = 232,
+            Width = 200,
+            Height = 200,
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         var qrHint = new TextBlock
@@ -1003,14 +1007,9 @@ public sealed partial class MainWindow : Window
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.7,
         };
-        var copyLink = new Button { Content = "复制链接" };
-        var linkRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        linkRow.Children.Add(copyLink);
         stack.Children.Add(qrImage);
         stack.Children.Add(qrHint);
         stack.Children.Add(linkText);
-        stack.Children.Add(linkRow);
-
         stack.Children.Add(new TextBlock { Text = "配对码", Margin = new Thickness(0, 8, 0, 0) });
         stack.Children.Add(codeBlock);
         stack.Children.Add(countdown);
@@ -1019,16 +1018,27 @@ public sealed partial class MainWindow : Window
         stack.Children.Add(deviceList);
         stack.Children.Add(status);
 
+        // The dialog grows with the device list and the QR; scrolling keeps every control
+        // (notably 重新生成) reachable on a short window.
+        var scroll = new ScrollView
+        {
+            Content = stack,
+            MaxHeight = 520,
+            VerticalScrollBarVisibility = ScrollingScrollBarVisibility.Auto,
+        };
+
         var dialog = new ContentDialog
         {
             Title = "配对码与设备",
-            Content = stack,
+            Content = scroll,
             CloseButtonText = "关闭",
             XamlRoot = Root.XamlRoot,
         };
 
         PairingInfoDto? current = null;
-        string? qrAddress = null;
+        // Address *and* code: regenerating the code must also redraw the QR, otherwise the
+        // picture keeps advertising a code the plugin no longer accepts.
+        string? qrKey = null;
 
         /// <summary>
         /// The phone must reach whichever address actually works: the tunnel when it runs,
@@ -1047,7 +1057,9 @@ public sealed partial class MainWindow : Window
         async Task RefreshQrAsync(PairingResponseDto response)
         {
             var address = EffectiveAddress(response);
-            if (address == qrAddress)
+            var code = response.Pairing?.Code ?? current?.Code ?? "";
+            var key = $"{address}|{code}";
+            if (key == qrKey)
             {
                 return;
             }
@@ -1061,7 +1073,7 @@ public sealed partial class MainWindow : Window
                     return;
                 }
                 qrImage.Source = await LoadBitmapAsync(bytes);
-                qrAddress = address;
+                qrKey = key;
                 qrHint.Text = "手机相机扫这个码即可配对（App 内也可点「扫码连接」）";
             }
             catch (Exception ex)
@@ -1160,7 +1172,7 @@ public sealed partial class MainWindow : Window
             {
                 current = await local.RegeneratePairingAsync();
                 codeBlock.Text = current?.Code ?? "------";
-                qrAddress = null; // a new code means a new QR
+                qrKey = null; // a new code means a new QR
                 status.Text = "已生成新的配对码";
                 await ReloadAsync();
             }

@@ -56,6 +56,8 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
     private PairingScreen pairing;
     /** A QR link that arrived before the pairing screen existed. */
     private PairLink pendingPairLink;
+    private String lastPairLink;
+    private long lastPairLinkAt;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -214,19 +216,57 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
         }
     }
 
-    /** Parses a scanned/opened link; shows the pairing screen when one is not up yet. */
+    /** Parses a scanned/opened link; connects directly when this host is already paired. */
     private void acceptPairLink(String raw) {
+        // The camera app can deliver the same intent twice (cold start + resume); treating the
+        // second one as a new pairing attempt is what produced "no-pairing" errors.
+        long now = System.currentTimeMillis();
+        if (raw == null || (raw.equals(lastPairLink) && now - lastPairLinkAt < 10_000)) {
+            return;
+        }
+        lastPairLink = raw;
+        lastPairLinkAt = now;
+
         PairLink link = PairLink.parse(raw);
         if (link == null) {
             Toast.makeText(this, "链接不完整：缺少地址或配对码", Toast.LENGTH_LONG).show();
             return;
         }
+
+        // A token for this very host is still good: just point the app at it, no re-pairing.
+        if (!prefs.token().isEmpty() && sameHost(prefs.server(), link.url)) {
+            prefs.setServer(link.url);
+            Toast.makeText(this, "已连接，无需重新配对", Toast.LENGTH_SHORT).show();
+            connect();
+            return;
+        }
+
         if (pairing != null && !sessionsVisible()) {
             pairing.applyLink(link);
             return;
         }
         pendingPairLink = link;
         showPairing();
+    }
+
+    private static boolean sameHost(String a, String b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+            return false;
+        }
+        return authorityOf(a).equalsIgnoreCase(authorityOf(b));
+    }
+
+    private static String authorityOf(String url) {
+        try {
+            android.net.Uri uri = android.net.Uri.parse(url);
+            String host = uri.getHost();
+            if (host == null) {
+                return url;
+            }
+            return uri.getPort() > 0 ? host + ":" + uri.getPort() : host;
+        } catch (Exception error) {
+            return url;
+        }
     }
 
     @Override

@@ -8,9 +8,11 @@ import android.hardware.Camera;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.ViewGroup;
 import android.widget.TextView;
 
 import com.google.zxing.BarcodeFormat;
@@ -161,6 +163,7 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
             previewWidth = camera.getParameters().getPreviewSize().width;
             previewHeight = camera.getParameters().getPreviewSize().height;
             camera.setDisplayOrientation(90);
+            fitPreviewToFrame();
             camera.setPreviewDisplay(holder);
             camera.setPreviewCallback(this);
             camera.startPreview();
@@ -172,6 +175,34 @@ public class ScanActivity extends Activity implements SurfaceHolder.Callback, Ca
     }
 
     /** A mid-size preview decodes fast enough and still resolves a screen-sized QR. */
+    /**
+     * The sensor frame is landscape (e.g. 1280x720) and is rotated 90° for display, so the
+     * on-screen shape must be 720:1280 — not the screen's own shape. Sizing the SurfaceView to
+     * that ratio and letting it overflow ("cover") keeps the picture undistorted.
+     */
+    private void fitPreviewToFrame() {
+        if (previewWidth <= 0 || previewHeight <= 0 || preview == null) {
+            return;
+        }
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int screenWidth = metrics.widthPixels;
+        int screenHeight = metrics.heightPixels;
+
+        // Rotated: width:height == previewHeight:previewWidth.
+        float ratio = (float) previewHeight / (float) previewWidth;
+        int width = screenWidth;
+        int height = Math.round(width / ratio);
+        if (height < screenHeight) {
+            height = screenHeight;
+            width = Math.round(height * ratio);
+        }
+
+        ViewGroup.LayoutParams params = preview.getLayoutParams();
+        params.width = width;
+        params.height = height;
+        preview.setLayoutParams(params);
+    }
+
     private static Camera.Size pickPreviewSize(Camera.Parameters parameters) {
         List<Camera.Size> sizes = parameters.getSupportedPreviewSizes();
         if (sizes == null || sizes.isEmpty()) {
