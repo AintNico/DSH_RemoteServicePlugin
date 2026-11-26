@@ -218,10 +218,11 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
 
     /** Parses a scanned/opened link; connects directly when this host is already paired. */
     private void acceptPairLink(String raw) {
-        // The camera app can deliver the same intent twice (cold start + resume); treating the
-        // second one as a new pairing attempt is what produced "no-pairing" errors.
+        // The camera app can deliver the same intent twice within a second (cold start +
+        // resume). Only that immediate duplicate is dropped: a deliberate second scan must
+        // always do something visible.
         long now = System.currentTimeMillis();
-        if (raw == null || (raw.equals(lastPairLink) && now - lastPairLinkAt < 10_000)) {
+        if (raw == null || (raw.equals(lastPairLink) && now - lastPairLinkAt < 2_000)) {
             return;
         }
         lastPairLink = raw;
@@ -233,11 +234,10 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
             return;
         }
 
-        // A token for this very host is still good: just point the app at it, no re-pairing.
+        // A token for this very host may still be good — but verify it instead of silently
+        // "connecting" to a token the plugin no longer knows (that looked like a dead scan).
         if (!prefs.token().isEmpty() && sameHost(prefs.server(), link.url)) {
-            prefs.setServer(link.url);
-            Toast.makeText(this, "已连接，无需重新配对", Toast.LENGTH_SHORT).show();
-            connect();
+            verifyOrPair(link);
             return;
         }
 
@@ -247,6 +247,41 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
         }
         pendingPairLink = link;
         showPairing();
+    }
+
+    /**
+     * The scanned host is the one we already paired with. Check the token still works before
+     * pretending to connect: after a plugin restart the old token is gone and a silent
+     * "connect" would look like the scan did nothing.
+     */
+    private void verifyOrPair(PairLink link) {
+        Toast.makeText(this, "正在确认连接…", Toast.LENGTH_SHORT).show();
+        final Api probe = new Api(link.url, prefs.token());
+        io.execute(() -> {
+            boolean usable;
+            try {
+                probe.workspaces();
+                usable = true;
+            } catch (Api.ApiException error) {
+                usable = !"unauthorized".equals(error.code());
+            } catch (Exception error) {
+                // Network trouble: keep the token, the reconnect loop will handle it.
+                usable = true;
+            }
+            final boolean ok = usable;
+            main.post(() -> {
+                if (ok) {
+                    prefs.setServer(link.url);
+                    Toast.makeText(this, "已连接到 " + authorityOf(link.url) + "，无需重新配对",
+                            Toast.LENGTH_SHORT).show();
+                    connect();
+                } else {
+                    // The token is stale: fall back to a real pairing with the scanned code.
+                    pendingPairLink = link;
+                    showPairing();
+                }
+            });
+        });
     }
 
     private static boolean sameHost(String a, String b) {

@@ -35,6 +35,8 @@ public final class PairingScreen {
     }
 
     public void show() {
+        // Every fresh pairing screen starts idle; a stale flag would swallow the next scan.
+        submitting = false;
         View root = host.activity().getLayoutInflater().inflate(R.layout.activity_pairing, null);
         serverField = root.findViewById(R.id.pairing_server);
         codeField = root.findViewById(R.id.pairing_code);
