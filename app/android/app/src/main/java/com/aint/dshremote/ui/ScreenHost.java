@@ -48,4 +48,7 @@ public interface ScreenHost {
 
     /** Opens the document picker; the result is staged into the current chat. */
     void startFilePicker();
+
+    /** Opens the in-app QR scanner; a successful scan feeds {@link PairingScreen#applyLink}. */
+    void scanPairingCode();
 }

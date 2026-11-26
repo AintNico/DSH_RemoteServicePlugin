@@ -36,6 +36,14 @@ public sealed class PairingResponseDto
 
     [JsonPropertyName("devices")]
     public List<DeviceDto> Devices { get; set; } = new();
+
+    /// <summary>LAN address the phone should use, as the plugin sees it.</summary>
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    /// <summary>`dshremote://pair?...` — what the QR encodes and what the phone parses.</summary>
+    [JsonPropertyName("payload")]
+    public string? Payload { get; set; }
 }
 
 public sealed class PairingOnlyDto

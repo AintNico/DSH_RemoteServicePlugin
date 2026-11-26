@@ -17,6 +17,7 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import com.aint.dshremote.ui.ChatScreen;
+import com.aint.dshremote.ui.PairLink;
 import com.aint.dshremote.ui.PairingScreen;
 import com.aint.dshremote.ui.PendingStore;
 import com.aint.dshremote.ui.ScreenHost;
@@ -40,6 +41,7 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
 
     private static final int REQ_PICK_FILE = 1001;
     private static final int REQ_NOTIFICATIONS = 1002;
+    private static final int REQ_SCAN = 1003;
 
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -51,6 +53,9 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
 
     private SessionsScreen sessions;
     private ChatScreen chat;
+    private PairingScreen pairing;
+    /** A QR link that arrived before the pairing screen existed. */
+    private PairLink pendingPairLink;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -89,6 +94,13 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
             return;
         }
         String action = intent.getAction();
+
+        // The desktop QR encodes dshremote://pair?...; the camera app opens exactly that.
+        if (Intent.ACTION_VIEW.equals(action) && PairLink.isPairLink(intent.getData())) {
+            acceptPairLink(intent.getDataString());
+            return;
+        }
+
         // SEND/SEND_MULTIPLE is the system share sheet; VIEW is what QQ's "用其他应用打开" uses.
         if (!Intent.ACTION_SEND.equals(action)
                 && !Intent.ACTION_SEND_MULTIPLE.equals(action)
@@ -191,13 +203,37 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
     public void showPairing() {
         sessionId = null;
         detachScreens();
-        new PairingScreen(this, this::connect).show();
+        pairing = new PairingScreen(this, this::connect);
+        pairing.show();
+        // A link that arrived while another screen was installed is applied once the
+        // pairing screen exists, so scanning from cold start also works.
+        if (pendingPairLink != null) {
+            PairLink link = pendingPairLink;
+            pendingPairLink = null;
+            pairing.applyLink(link);
+        }
+    }
+
+    /** Parses a scanned/opened link; shows the pairing screen when one is not up yet. */
+    private void acceptPairLink(String raw) {
+        PairLink link = PairLink.parse(raw);
+        if (link == null) {
+            Toast.makeText(this, "链接不完整：缺少地址或配对码", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (pairing != null && !sessionsVisible()) {
+            pairing.applyLink(link);
+            return;
+        }
+        pendingPairLink = link;
+        showPairing();
     }
 
     @Override
     public void showSessions() {
         sessionId = null;
         detachScreens();
+        pairing = null;
         // The instance is kept for the activity's lifetime: the list cache (rows, count,
         // refresh timestamp) must survive a detour through a chat, exactly as before.
         if (sessions == null) {
@@ -211,6 +247,7 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
         Uri initialShare = sharedUri;
         sharedUri = null;
         detachScreens();
+        pairing = null;
         Function<String, String> sessionNames =
                 sessions != null ? sessions::titleForSession : id -> null;
         this.sessionId = sessionId;
@@ -326,8 +363,21 @@ public class MainActivity extends Activity implements ScreenHost, LiveLink.Liste
     }
 
     @Override
+    public void scanPairingCode() {
+        startActivityForResult(new Intent(this, ScanActivity.class), REQ_SCAN);
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_SCAN) {
+            if (resultCode == RESULT_OK && data != null) {
+                acceptPairLink(data.getStringExtra(ScanActivity.EXTRA_RESULT));
+            }
+            return;
+        }
+
         if (requestCode != REQ_PICK_FILE || resultCode != RESULT_OK || data == null) {
             return;
         }

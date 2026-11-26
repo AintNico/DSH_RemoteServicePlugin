@@ -297,6 +297,23 @@ public sealed class RemoteApi : IDisposable
         return value.Pairing;
     }
 
+    /// <summary>
+    /// PNG of the pairing deep link, drawn by the plugin so the desktop needs no QR library.
+    /// <paramref name="address"/> lets the code encode the current tunnel URL instead of the LAN one.
+    /// </summary>
+    public async Task<byte[]?> GetPairingQrAsync(string? address, CancellationToken cancellationToken = default)
+    {
+        var query = string.IsNullOrWhiteSpace(address)
+            ? "api/pairing/qr.png"
+            : $"api/pairing/qr.png?url={Uri.EscapeDataString(address)}";
+        using var response = await _http.GetAsync(query, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    }
+
     public async Task<bool> RevokeDeviceAsync(string id, CancellationToken cancellationToken = default)
     {
         using var response = await _http.PostAsJsonAsync("api/devices/revoke", new { id }, cancellationToken);

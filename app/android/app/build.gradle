@@ -25,3 +25,8 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    // QR decoding for the in-app scanner; pure Java, no AndroidX.
+    implementation 'com.google.zxing:core:3.5.3'
+}

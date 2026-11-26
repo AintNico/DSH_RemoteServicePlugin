@@ -10,6 +10,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics;
 using Windows.System;
 using Drawing = System.Drawing;
@@ -190,6 +191,23 @@ public sealed partial class MainWindow : Window
     {
         var url = NetworkInfo.LanBaseUrl(ServicePort);
         return string.IsNullOrEmpty(url) ? "未检测到局域网地址" : url;
+    }
+
+    /// <summary>Turns PNG bytes from the plugin into an image the dialog can show.</summary>
+    private static async Task<BitmapImage> LoadBitmapAsync(byte[] bytes)
+    {
+        using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+        using (var writer = new Windows.Storage.Streams.DataWriter(stream.GetOutputStreamAt(0)))
+        {
+            writer.WriteBytes(bytes);
+            await writer.StoreAsync();
+            await writer.FlushAsync();
+            writer.DetachStream();
+        }
+        stream.Seek(0);
+        var bitmap = new BitmapImage();
+        await bitmap.SetSourceAsync(stream);
+        return bitmap;
     }
 
     private static bool CopyToClipboard(string text)
@@ -962,6 +980,37 @@ public sealed partial class MainWindow : Window
         });
         stack.Children.Add(addressText);
         stack.Children.Add(addressRow);
+
+        // The QR carries the same deep link the button copies, so scanning replaces typing.
+        var qrImage = new Image
+        {
+            Width = 232,
+            Height = 232,
+            HorizontalAlignment = HorizontalAlignment.Left,
+        };
+        var qrHint = new TextBlock
+        {
+            Text = "手机相机扫这个码即可配对（App 内也可点「扫码连接」）",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush", Colors.Gray),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var linkText = new TextBlock
+        {
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 11,
+            IsTextSelectionEnabled = true,
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.7,
+        };
+        var copyLink = new Button { Content = "复制链接" };
+        var linkRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        linkRow.Children.Add(copyLink);
+        stack.Children.Add(qrImage);
+        stack.Children.Add(qrHint);
+        stack.Children.Add(linkText);
+        stack.Children.Add(linkRow);
+
         stack.Children.Add(new TextBlock { Text = "配对码", Margin = new Thickness(0, 8, 0, 0) });
         stack.Children.Add(codeBlock);
         stack.Children.Add(countdown);
@@ -979,6 +1028,48 @@ public sealed partial class MainWindow : Window
         };
 
         PairingInfoDto? current = null;
+        string? qrAddress = null;
+
+        /// <summary>
+        /// The phone must reach whichever address actually works: the tunnel when it runs,
+        /// otherwise the LAN address the plugin reported.
+        /// </summary>
+        string EffectiveAddress(PairingResponseDto response)
+        {
+            var tunnel = _tunnel.PublicUrl;
+            if (!string.IsNullOrWhiteSpace(tunnel))
+            {
+                return tunnel!;
+            }
+            return string.IsNullOrWhiteSpace(response.Url) ? LanBaseUrlOrHint() : response.Url!;
+        }
+
+        async Task RefreshQrAsync(PairingResponseDto response)
+        {
+            var address = EffectiveAddress(response);
+            if (address == qrAddress)
+            {
+                return;
+            }
+            try
+            {
+                var bytes = await local.GetPairingQrAsync(address);
+                if (bytes is null)
+                {
+                    qrImage.Source = null;
+                    qrHint.Text = "二维码暂不可用（配对码可能已过期，点“重新生成”）";
+                    return;
+                }
+                qrImage.Source = await LoadBitmapAsync(bytes);
+                qrAddress = address;
+                qrHint.Text = "手机相机扫这个码即可配对（App 内也可点「扫码连接」）";
+            }
+            catch (Exception ex)
+            {
+                qrImage.Source = null;
+                qrHint.Text = $"二维码生成失败：{ex.Message}";
+            }
+        }
 
         async Task ReloadAsync()
         {
@@ -989,8 +1080,15 @@ public sealed partial class MainWindow : Window
                 if (current is null)
                 {
                     current = await local.RegeneratePairingAsync();
+                    response = await local.GetPairingAsync();
                 }
                 codeBlock.Text = current?.Code ?? "------";
+
+                var address = EffectiveAddress(response);
+                linkText.Text = current is null
+                    ? string.Empty
+                    : $"dshremote://pair?v=1&url={Uri.EscapeDataString(address)}&code={current.Code}";
+                await RefreshQrAsync(response);
 
                 deviceList.Children.Clear();
                 if (response.Devices.Count == 0)
@@ -1032,7 +1130,7 @@ public sealed partial class MainWindow : Window
         }
 
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        timer.Tick += (_, _) =>
+        timer.Tick += async (_, _) =>
         {
             if (current is null)
             {
@@ -1043,6 +1141,12 @@ public sealed partial class MainWindow : Window
             countdown.Text = left.TotalSeconds <= 0
                 ? "已过期，点击“重新生成”"
                 : $"剩余 {(int)left.TotalMinutes}:{left.Seconds:D2}";
+
+            // Starting or stopping the tunnel changes the address the phone must use.
+            if (left.TotalSeconds > 0)
+            {
+                await RefreshQrAsync(await local.GetPairingAsync());
+            }
         };
         dialog.Closed += (_, _) =>
         {
@@ -1056,11 +1160,21 @@ public sealed partial class MainWindow : Window
             {
                 current = await local.RegeneratePairingAsync();
                 codeBlock.Text = current?.Code ?? "------";
+                qrAddress = null; // a new code means a new QR
                 status.Text = "已生成新的配对码";
+                await ReloadAsync();
             }
             catch (Exception ex)
             {
                 status.Text = $"生成失败：{ex.Message}";
+            }
+        };
+
+        copyLink.Click += (_, _) =>
+        {
+            if (!string.IsNullOrEmpty(linkText.Text) && CopyToClipboard(linkText.Text))
+            {
+                copyLink.Content = "已复制";
             }
         };
 
