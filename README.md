@@ -43,7 +43,11 @@ git clone https://github.com/AintNico/DSH_RemoteServicePlugin.git
 
 从 [Releases](../../releases) 下载 `DSH-Remote-<版本>-android.apk` 安装。
 
-打开 App → 点「自动发现电脑」或手填地址 → 输入 6 位配对码（桌面端窗口左下角「配对码」）→ 完成。
+**最快的配对方式是扫码**：桌面端点左下角「配对码」，弹窗里有一张二维码。
+
+- 用**手机相机**扫 → 系统识别出 `dshremote://pair?...` → 直接唤起 App 完成配对
+- 或在 App 里点「**扫码连接**」→ 用应用内相机扫同一张码
+- 都不方便时再退回到手填：地址 + 6 位配对码
 
 详细步骤和排错见 [docs/INSTALL.md](docs/INSTALL.md)。
 
